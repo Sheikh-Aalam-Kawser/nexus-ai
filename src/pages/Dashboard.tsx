@@ -189,9 +189,6 @@ export default function Dashboard() {
       toast.success("Task decomposed into actionable steps", { id: 'decompose' });
     } catch (e: any) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      if (errMsg.includes("denied access") || errMsg.includes("403") || errMsg.includes("PERMISSION_DENIED")) {
-        setHasApiKeyError(true);
-      }
       toast.error(e instanceof Error ? e.message : "Failed to decompose task", { id: 'decompose' });
     }
   };
@@ -213,9 +210,6 @@ export default function Dashboard() {
       toast.success("Focus blocks scheduled", { id: 'schedule' });
     } catch (e: any) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      if (errMsg.includes("denied access") || errMsg.includes("403") || errMsg.includes("PERMISSION_DENIED")) {
-        setHasApiKeyError(true);
-      }
       toast.error(e instanceof Error ? e.message : "Failed to schedule task", { id: 'schedule' });
     }
   };
@@ -237,9 +231,6 @@ export default function Dashboard() {
       toast.success("Insights generated", { id: 'reflect' });
     } catch (e: any) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      if (errMsg.includes("denied access") || errMsg.includes("403") || errMsg.includes("PERMISSION_DENIED")) {
-        setHasApiKeyError(true);
-      }
       toast.error(e instanceof Error ? e.message : "Failed to generate insights", { id: 'reflect' });
     }
   };
@@ -954,7 +945,7 @@ END:VCALENDAR`;
         </Card>
       )}
 
-      <VoiceOrb onApiKeyError={() => {}} />
+      <VoiceOrb />
     </div>
   );
 }

@@ -18,74 +18,12 @@ function getAIClient(req: express.Request): any {
   }
 
   const trimmedKey = key.trim();
+  const cleanKey = trimmedKey.replace(/^["']|["']$/g, '');
 
-  // If it's a standard Google API key, it starts with AIza
-  if (trimmedKey.startsWith('AIza')) {
-    return new GoogleGenAI({ 
-      apiKey: trimmedKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-    });
-  }
-
-  // Otherwise assume it's an OAuth Bearer token (like ya29.)
-  return {
-    models: {
-      generateContent: async ({ model, contents, config }: any) => {
-        let contentsPayload: any[];
-          if (typeof contents === 'string') {
-            contentsPayload = [{ role: 'user', parts: [{ text: contents }] }];
-          } else if (Array.isArray(contents)) {
-            contentsPayload = contents.map(item => {
-              if (typeof item === 'string') {
-                return { role: 'user', parts: [{ text: item }] };
-              }
-              return item;
-            });
-          } else {
-            contentsPayload = [{ role: 'user', parts: [{ text: String(contents) }] }];
-          }
-
-          const payload: any = {
-            contents: contentsPayload
-          };
-
-          if (config) {
-            payload.generationConfig = {};
-            if (config.responseMimeType) {
-              payload.generationConfig.responseMimeType = config.responseMimeType;
-            }
-            if (config.responseSchema) {
-              payload.generationConfig.responseSchema = config.responseSchema;
-            }
-            if (config.systemInstruction) {
-              payload.systemInstruction = {
-                parts: [{ text: config.systemInstruction }]
-              };
-            }
-          }
-
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${trimmedKey}`,
-              'User-Agent': 'aistudio-build'
-            },
-            body: JSON.stringify(payload)
-          });
-
-          if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`Gemini REST API error (${res.status}): ${errText}`);
-          }
-
-          const data = await res.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          return { text };
-        }
-      }
-    };
+  return new GoogleGenAI({ 
+    apiKey: cleanKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +50,7 @@ Collaborative sequence to execute:
 6. "Orchestrating agent": Coordinates the sequence, performs final quality assurance, and validates that all deliverables are cohesive.`;
 
     const response = await aiInstance.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         systemInstruction: "You are the NEXUS Multi-Agent Orchestrator. You coordinate a multi-agent system comprising: 'Perceiving agent', 'Prioritizing agent', 'Decomposing Agent', 'Planning agent', 'Autonomous task automation agent', and 'Orchestrating agent'. Each agent must perform its specific role sequentially to analyze, prioritize, decompose, plan, and draft automations for the task. You must return the final output strictly adhering to the JSON schema, with detailed collaborative logs for each agent.",
@@ -184,7 +122,7 @@ User Preferences (Peak hours, DND): ${JSON.stringify(preferences)}
 Existing Events: ${JSON.stringify(existingEvents || [])}`;
 
     const response = await aiInstance.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         systemInstruction: "You are the NEXUS Scheduler Agent. Propose calendar blocks avoiding existing events and respecting user preferences. Output JSON.",
@@ -220,7 +158,7 @@ app.post("/api/agents/voice", async (req, res) => {
   try {
     const aiInstance = getAIClient(req);
     const response = await aiInstance.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: `Parse this voice command into a task: "${transcript}"\nCurrent Time: ${new Date().toISOString()}`,
       config: {
         systemInstruction: "You extract task name, deadline, and priority from natural language voice commands. Output JSON.",
@@ -251,7 +189,7 @@ app.post("/api/agents/nudge", async (req, res) => {
   try {
     const aiInstance = getAIClient(req);
     const response = await aiInstance.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: `Task: ${JSON.stringify(task)}\nUser State: ${JSON.stringify(userState)}`,
       config: {
         systemInstruction: "You are the NEXUS Nudge Agent. Generate a context-aware nudge message (max 2 sentences) and a suggested micro-action.",
@@ -279,7 +217,7 @@ app.post("/api/agents/execute", async (req, res) => {
   try {
     const aiInstance = getAIClient(req);
     const response = await aiInstance.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: `Action: ${actionType}\nDetails: ${JSON.stringify(details)}`,
       config: {
         systemInstruction: "You are the NEXUS Execution Agent. Draft an email or calendar event description based on the request.",
@@ -307,7 +245,7 @@ app.post("/api/agents/reflect", async (req, res) => {
   try {
     const aiInstance = getAIClient(req);
     const response = await aiInstance.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: `Completed Tasks: ${JSON.stringify(completedTasks)}`,
       config: {
         systemInstruction: "You are the NEXUS Reflection Agent. Analyze the completed tasks and provide 3 actionable insights on the user's productivity patterns.",
@@ -341,7 +279,7 @@ app.post("/api/agents/reprioritize", async (req, res) => {
   try {
     const aiInstance = getAIClient(req);
     const response = await aiInstance.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: `Current tasks: ${JSON.stringify(tasks)}\nCurrent Time: ${new Date().toISOString()}`,
       config: {
         systemInstruction: "You are the NEXUS Orchestrator Agent. You analyze the list of tasks. For each task, calculate/re-evaluate its priority score (1.0 to 10.0 scale, where 10 is highest), urgency, impact, and effort. If a task has no subtasks (is empty or length is 0) and is pending/in-progress, generate 3 to 5 clear, sequential, and highly actionable subtasks (each with a unique id, title, estimatedMinutes, and completed: false). Provide a short overall focus plan under globalPlanInsight.",
@@ -418,7 +356,7 @@ app.post("/api/agents/generate-plan", async (req, res) => {
   try {
     const aiInstance = getAIClient(req);
     const response = await aiInstance.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: `Generate a realistic, structured, chronologically sequenced execution plan to complete all pending tasks before their deadlines.
 Current tasks: ${JSON.stringify(pendingTasks)}
 Current Time: ${new Date().toISOString()}`,
