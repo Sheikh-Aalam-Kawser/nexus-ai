@@ -12,20 +12,26 @@ const PORT = 3000;
 
 // Helper to get Gemini AI Client dynamically (allows client-supplied API key or OAuth access token)
 function getAIClient(req: express.Request): any {
-  const customKey = req.headers['x-gemini-api-key'];
-  const key = (typeof customKey === 'string' && customKey.trim()) ? customKey.trim() : process.env.GEMINI_API_KEY;
+  const key = process.env.GEMINI_API_KEY;
   if (!key) {
-    throw new Error("No Gemini API key found. Please configure the GEMINI_API_KEY in the workspace Settings, or enter your personal key in the dashboard API Key panel.");
+    throw new Error("No Gemini API key found. Please configure the GEMINI_API_KEY in the workspace Settings.");
   }
 
   const trimmedKey = key.trim();
 
-  // If it's an OAuth Bearer token (starts with AQ. or ya29.)
-  if (trimmedKey.startsWith('AQ.') || trimmedKey.startsWith('ya29.')) {
-    return {
-      models: {
-        generateContent: async ({ model, contents, config }: any) => {
-          let contentsPayload: any[];
+  // If it's a standard Google API key, it starts with AIza
+  if (trimmedKey.startsWith('AIza')) {
+    return new GoogleGenAI({ 
+      apiKey: trimmedKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+    });
+  }
+
+  // Otherwise assume it's an OAuth Bearer token (like ya29.)
+  return {
+    models: {
+      generateContent: async ({ model, contents, config }: any) => {
+        let contentsPayload: any[];
           if (typeof contents === 'string') {
             contentsPayload = [{ role: 'user', parts: [{ text: contents }] }];
           } else if (Array.isArray(contents)) {
@@ -80,12 +86,6 @@ function getAIClient(req: express.Request): any {
         }
       }
     };
-  }
-
-  return new GoogleGenAI({ 
-    apiKey: trimmedKey,
-    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-  });
 }
 
 // ---------------------------------------------------------------------------

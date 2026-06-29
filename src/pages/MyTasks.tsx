@@ -50,7 +50,6 @@ export default function MyTasks() {
     deleteTask, 
     primaryFocusTaskId, 
     setPrimaryFocusTaskId,
-    geminiApiKey,
     triggerAutoAIPlan 
   } = useAppStore();
 
@@ -175,8 +174,7 @@ export default function MyTasks() {
       const res = await fetch('/api/agents/decompose', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ title: task.title, description: task.description, deadline: task.deadline })
       });

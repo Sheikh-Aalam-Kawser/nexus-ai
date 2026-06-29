@@ -8,7 +8,6 @@ interface AppState {
   tasks: Task[];
   insights: string[];
   isVoiceListening: boolean;
-  geminiApiKey: string | null;
   primaryFocusTaskId: string | null;
   emergencyMode: boolean;
   proposedPlan: TaskPlan | null;
@@ -22,7 +21,6 @@ interface AppState {
   setTasks: (tasks: Task[]) => void;
   setInsights: (insights: string[]) => void;
   setVoiceListening: (isListening: boolean) => void;
-  setGeminiApiKey: (key: string | null) => void;
   setPrimaryFocusTaskId: (id: string | null) => void;
   setEmergencyMode: (active: boolean) => void;
   triggerAutoAIPlan: () => Promise<void>;
@@ -48,7 +46,6 @@ export const useAppStore = create<AppState>()(
       tasks: [],
       insights: [],
       isVoiceListening: false,
-      geminiApiKey: null,
       primaryFocusTaskId: null,
       emergencyMode: false,
       proposedPlan: null,
@@ -87,7 +84,6 @@ export const useAppStore = create<AppState>()(
       },
       setInsights: (insights) => set({ insights }),
       setVoiceListening: (isVoiceListening) => set({ isVoiceListening }),
-      setGeminiApiKey: (geminiApiKey) => set({ geminiApiKey }),
       setPrimaryFocusTaskId: (primaryFocusTaskId) => set({ primaryFocusTaskId }),
       setEmergencyMode: (emergencyMode) => set({ emergencyMode }),
       autoEvaluatePrioritiesAndFocus: () => {
@@ -133,7 +129,6 @@ export const useAppStore = create<AppState>()(
       },
       triggerAutoAIPlan: async () => {
         const currentTasks = get().tasks;
-        const geminiApiKey = get().geminiApiKey;
         const pending = currentTasks.filter(t => t.status !== 'completed');
         if (pending.length === 0) return;
 
@@ -141,8 +136,7 @@ export const useAppStore = create<AppState>()(
           const res = await fetch('/api/agents/reprioritize', {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+              'Content-Type': 'application/json'
             },
             body: JSON.stringify({ tasks: currentTasks })
           });
@@ -194,13 +188,11 @@ export const useAppStore = create<AppState>()(
       generateProposedPlan: async () => {
         set({ planStatus: 'generating' });
         const currentTasks = get().tasks;
-        const geminiApiKey = get().geminiApiKey;
         try {
           const res = await fetch('/api/agents/generate-plan', {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+              'Content-Type': 'application/json'
             },
             body: JSON.stringify({ tasks: currentTasks })
           });

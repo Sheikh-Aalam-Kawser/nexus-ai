@@ -94,8 +94,6 @@ export default function Dashboard() {
     user, 
     updateTask, 
     addTask, 
-    geminiApiKey, 
-    setGeminiApiKey,
     primaryFocusTaskId,
     setPrimaryFocusTaskId,
     emergencyMode,
@@ -104,8 +102,6 @@ export default function Dashboard() {
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newTask, setNewTask] = useState({ title: '', description: '', deadline: '' });
-  const [localKeyInput, setLocalKeyInput] = useState(geminiApiKey || '');
-  const [hasApiKeyError, setHasApiKeyError] = useState(false);
   const [expandedAgentLogs, setExpandedAgentLogs] = useState<Record<string, boolean>>({});
 
   // States for Perceive, Plan, and Act requirements
@@ -175,8 +171,7 @@ export default function Dashboard() {
       const res = await fetch('/api/agents/decompose', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ title: task.title, description: task.description, deadline: task.deadline })
       });
@@ -207,8 +202,7 @@ export default function Dashboard() {
       const res = await fetch('/api/agents/schedule', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ task, subtasks: task.subtasks })
       });
@@ -232,8 +226,7 @@ export default function Dashboard() {
       const res = await fetch('/api/agents/reflect', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ completedTasks })
       });
@@ -276,8 +269,7 @@ export default function Dashboard() {
         const res = await fetch('/api/agents/nudge', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             task: focusTask,
@@ -313,7 +305,7 @@ export default function Dashboard() {
     };
 
     fetchNudge();
-  }, [focusTask?.id, geminiApiKey]);
+  }, [focusTask?.id]);
 
   // 2. Plan: Manual/Automated Orchestrator run
   const handleGlobalOrchestrate = async () => {
@@ -338,8 +330,7 @@ export default function Dashboard() {
       const res = await fetch('/api/agents/execute', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           actionType,
@@ -963,66 +954,7 @@ END:VCALENDAR`;
         </Card>
       )}
 
-      {/* API Key error alerts */}
-      {hasApiKeyError && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-6 text-amber-200 flex flex-col gap-4">
-          <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-            <div className="space-y-2">
-              <h3 className="font-semibold text-lg flex items-center gap-2 text-amber-400">
-                <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
-                API Key Setup / Permission Required
-              </h3>
-              <p className="text-sm text-slate-300">
-                The application encountered a <strong>Permission Denied (403)</strong> error from Google Gemini. This happens because G Suite organizational/school accounts often block access to consumer Google AI services.
-              </p>
-            </div>
-            <Button variant="outline" size="sm" className="border-amber-500/30 text-amber-200 hover:bg-amber-500/10 shrink-0 self-end md:self-start" onClick={() => setHasApiKeyError(false)}>
-              Dismiss
-            </Button>
-          </div>
-
-          <div className="bg-slate-950/80 p-5 rounded-xl border border-amber-500/20 space-y-4">
-            <div>
-              <p className="text-sm font-medium text-amber-300">
-                Bypass project setup: Enter your own personal Gemini API Key below
-              </p>
-              <p className="text-xs text-slate-400 mt-1">
-                Your key is saved locally in your browser's secure cache and will be sent directly in header requests to override the failing default key.
-              </p>
-            </div>
-            
-            <div className="flex flex-col sm:flex-row gap-3 max-w-lg">
-              <Input
-                type="password"
-                placeholder="Paste your Gemini API Key here (AIzaSy...)"
-                value={localKeyInput}
-                onChange={(e) => setLocalKeyInput(e.target.value)}
-                className="bg-slate-900 border-slate-800 text-white placeholder-slate-600 focus-visible:ring-amber-500"
-              />
-              <Button 
-                onClick={() => {
-                  if (!localKeyInput.trim()) {
-                    toast.error("Please enter a valid key");
-                    return;
-                  }
-                  setGeminiApiKey(localKeyInput.trim());
-                  setHasApiKeyError(false);
-                  toast.success("Custom Gemini API Key saved successfully!");
-                }} 
-                className="bg-amber-600 hover:bg-amber-500 text-white font-medium shrink-0"
-              >
-                Save Custom Key
-              </Button>
-            </div>
-            
-            <p className="text-[11px] text-slate-500 leading-normal">
-              Need a key? You can get a free personal Gemini API Key in 30 seconds (no credit card or billing required) by visiting the <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="underline text-amber-400 hover:text-amber-300">Google AI Studio portal</a>.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <VoiceOrb onApiKeyError={() => setHasApiKeyError(true)} />
+      <VoiceOrb onApiKeyError={() => {}} />
     </div>
   );
 }

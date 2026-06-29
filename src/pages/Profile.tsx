@@ -27,7 +27,6 @@ export default function Profile() {
   const { 
     tasks, 
     user, 
-    geminiApiKey, 
     insights,
     setInsights
   } = useAppStore();
@@ -48,8 +47,7 @@ export default function Profile() {
       const res = await fetch('/api/agents/reflect', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ completedTasks })
       });

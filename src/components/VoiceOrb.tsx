@@ -3,7 +3,7 @@ import { Mic, MicOff, Loader2 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
 
-export function VoiceOrb({ onApiKeyError }: { onApiKeyError?: () => void }) {
+export function VoiceOrb() {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -42,12 +42,10 @@ export function VoiceOrb({ onApiKeyError }: { onApiKeyError?: () => void }) {
       toast.loading(`Processing: "${transcript}"`, { id: 'voice-toast' });
       
       try {
-        const geminiApiKey = useAppStore.getState().geminiApiKey;
         const response = await fetch('/api/agents/voice', {
           method: 'POST',
           headers: { 
-            'Content-Type': 'application/json',
-            ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {})
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ transcript }),
         });
@@ -82,11 +80,8 @@ export function VoiceOrb({ onApiKeyError }: { onApiKeyError?: () => void }) {
         }
       } catch (err: any) {
         const errMsg = err.message || String(err);
-        if (errMsg.includes("denied access") || errMsg.includes("403") || errMsg.includes("PERMISSION_DENIED")) {
-          onApiKeyError?.();
-          toast.error("Permission Denied (403): A custom API Key is required to authorize voice features.", { id: 'voice-toast', duration: 5000 });
-        } else if (errMsg.includes("503") || errMsg.includes("unavailable") || errMsg.includes("overloaded")) {
-          toast.error("Model Temporarily Unavailable (503): Google's voice agent is currently experience high load. Please try again or check your custom key configuration.", { 
+        if (errMsg.includes("503") || errMsg.includes("unavailable") || errMsg.includes("overloaded")) {
+          toast.error("Model Temporarily Unavailable (503): Google's voice agent is currently experience high load. Please try again later.", { 
             id: 'voice-toast', 
             duration: 8000 
           });
