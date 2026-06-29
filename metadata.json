@@ -1,0 +1,10 @@
+{
+  "name": "Remix: Nexus",
+  "description": "Nexus is an AI application that **Perceives** user tasks, **Plans** by decomposing them into subtasks, **Prioritizes** high-impact work based on deadline and complexity, and **Acts** by executing functions such as syncing calendar events, generating `.ics` files, and emailing teams with progress updates. It provides a structured workflow for understanding, organizing, prioritizing, and carrying out user tasks through AI-driven automation.\n",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
