@@ -153,24 +153,55 @@ Existing Events: ${JSON.stringify(existingEvents || [])}`;
 // 3. Voice Parsing (NEXUS Voice Agent)
 // ---------------------------------------------------------------------------
 app.post("/api/agents/voice", async (req, res) => {
-  const { transcript } = req.body;
+  const { transcript, pendingTaskContext } = req.body;
   
   try {
     const aiInstance = getAIClient(req);
+    
+    let contents = "";
+    let systemInstruction = "";
+    let responseSchema: any = {};
+    
+    if (pendingTaskContext) {
+      contents = `The user is providing a deadline for the pending task "${pendingTaskContext.title}". Parse this voice input as a deadline. If they didn't provide a valid deadline, set needsClarification to true.
+Input: "${transcript}"
+Current Time: ${new Date().toISOString()}`;
+      systemInstruction = "You extract deadline from natural language voice commands for a specific pending task. Output JSON.";
+      responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          deadline: { type: Type.STRING, description: "ISO 8601 date, if a valid deadline was provided" },
+          needsClarification: { type: Type.BOOLEAN, description: "True if the input is not a valid deadline" },
+          conversationalResponse: { type: Type.STRING, description: "Friendly reply if needs clarification" }
+        }
+      };
+    } else {
+      contents = `Parse this voice input. If it is an explicit command to create a task (e.g. "Create a task to...", "Remind me to..."), extract the details. If it is just a greeting or casual speech (e.g. "hello", "hi"), set isTask to false and provide a friendly conversationalResponse acknowledging the user.
+Important: Determine if a specific deadline or timeframe was mentioned. If no deadline/timeframe was mentioned (like "today", "tomorrow", "by 5pm", "next week"), set needsDeadline to true.
+Input: "${transcript}"
+Current Time: ${new Date().toISOString()}`;
+      systemInstruction = "You determine if voice input is a task command or conversational. If a task, extract title, deadline, priority. If no explicit timeframe/deadline is spoken for a task, flag needsDeadline as true. Output JSON.";
+      responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          isTask: { type: Type.BOOLEAN, description: "True if user is creating a task, false if casual greeting/speech" },
+          needsDeadline: { type: Type.BOOLEAN, description: "True if the user is creating a task but DID NOT mention any specific deadline or timeframe in the input" },
+          title: { type: Type.STRING, description: "Extracted task name, if isTask is true" },
+          deadline: { type: Type.STRING, description: "ISO 8601 date, inferred ONLY if timeframe was mentioned" },
+          priorityScore: { type: Type.NUMBER },
+          conversationalResponse: { type: Type.STRING, description: "Friendly reply if isTask is false or if you need to ask for deadline" }
+        },
+        required: ["isTask"]
+      };
+    }
+
     const response = await aiInstance.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Parse this voice command into a task: "${transcript}"\nCurrent Time: ${new Date().toISOString()}`,
+      contents,
       config: {
-        systemInstruction: "You extract task name, deadline, and priority from natural language voice commands. Output JSON.",
+        systemInstruction,
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            deadline: { type: Type.STRING, description: "ISO 8601 date, inferred if possible" },
-            priorityScore: { type: Type.NUMBER }
-          }
-        }
+        responseSchema
       }
     });
     res.json(JSON.parse(response.text || '{}'));

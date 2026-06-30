@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 export function VoiceOrb() {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [pendingTask, setPendingTask] = useState<{ title: string, priorityScore?: number } | null>(null);
   const recognitionRef = useRef<any>(null);
   const { addTask } = useAppStore();
 
@@ -47,36 +48,72 @@ export function VoiceOrb() {
           headers: { 
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ transcript }),
+          body: JSON.stringify({ transcript, pendingTaskContext: pendingTask }),
         });
         
         if (!response.ok) { const errData = await response.json().catch(() => ({})); throw new Error(errData.error || 'Failed to parse voice command'); }
         const data = await response.json();
         
-        if (data.title) {
-          addTask({
-            id: crypto.randomUUID(),
-            userId: 'user', // would be actual uid
-            title: data.title,
-            description: `Generated from voice: "${transcript}"`,
-            deadline: data.deadline || new Date(Date.now() + 86400000).toISOString(),
-            status: 'pending',
-            priorityScore: data.priorityScore || 5,
-            subtasks: [],
-            focusBlocks: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-          toast.success(`Task added: ${data.title}`, { id: 'voice-toast' });
-          
-          // Basic TTS confirmation
+        const speak = (text: string) => {
           const synth = window.speechSynthesis;
           if (synth) {
-            const utterance = new SpeechSynthesisUtterance(`Added task: ${data.title}`);
+            const utterance = new SpeechSynthesisUtterance(text);
             synth.speak(utterance);
           }
+        };
+
+        if (pendingTask) {
+          if (data.needsClarification) {
+            toast.success(data.conversationalResponse || "Please specify a deadline.", { id: 'voice-toast' });
+            speak(data.conversationalResponse || "Please specify a deadline.");
+          } else {
+            addTask({
+              id: crypto.randomUUID(),
+              userId: 'user', // would be actual uid
+              title: pendingTask.title,
+              description: `Generated from voice.`,
+              deadline: data.deadline || new Date(Date.now() + 86400000).toISOString(),
+              status: 'pending',
+              priorityScore: pendingTask.priorityScore || 5,
+              subtasks: [],
+              focusBlocks: [],
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
+            toast.success(`Task added: ${pendingTask.title}`, { id: 'voice-toast' });
+            speak(`Added task: ${pendingTask.title}`);
+            setPendingTask(null);
+          }
         } else {
-          throw new Error("No task parsed");
+          if (data.isTask === false) {
+            toast.success(data.conversationalResponse || "Hello!", { id: 'voice-toast' });
+            speak(data.conversationalResponse || "Hello!");
+          } else if (data.isTask) {
+            if (data.needsDeadline) {
+              setPendingTask({ title: data.title, priorityScore: data.priorityScore });
+              const msg = `When is the deadline for ${data.title}?`;
+              toast.success(msg, { id: 'voice-toast' });
+              speak(msg);
+            } else if (data.title) {
+              addTask({
+                id: crypto.randomUUID(),
+                userId: 'user', // would be actual uid
+                title: data.title,
+                description: `Generated from voice: "${transcript}"`,
+                deadline: data.deadline || new Date(Date.now() + 86400000).toISOString(),
+                status: 'pending',
+                priorityScore: data.priorityScore || 5,
+                subtasks: [],
+                focusBlocks: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              });
+              toast.success(`Task added: ${data.title}`, { id: 'voice-toast' });
+              speak(`Added task: ${data.title}`);
+            }
+          } else {
+            throw new Error("No task parsed");
+          }
         }
       } catch (err: any) {
         const errMsg = err.message || String(err);
