@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "NEXUS Emergency Blocker",
+  "version": "1.0",
+  "description": "Strictly terminates network requests to social media domains during Emergency Mode.",
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://*.facebook.com/*",
+    "*://*.twitter.com/*",
+    "*://*.x.com/*",
+    "*://*.youtube.com/*",
+    "*://*.reddit.com/*",
+    "*://*.instagram.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_title": "NEXUS Emergency Blocker"
+  }
+}

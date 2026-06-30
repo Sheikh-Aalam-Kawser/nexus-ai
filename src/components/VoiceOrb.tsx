@@ -130,11 +130,11 @@ export function VoiceOrb() {
       }`}
     >
       {isProcessing ? (
-        <Loader2 className="h-6 w-6 animate-spin text-white" />
+        <Loader2 className="h-6 w-6 animate-spin text-slate-900" />
       ) : isListening ? (
-        <MicOff className="h-6 w-6 text-white" />
+        <MicOff className="h-6 w-6 text-slate-900" />
       ) : (
-        <Mic className="h-6 w-6 text-white" />
+        <Mic className="h-6 w-6 text-slate-900" />
       )}
     </button>
   );

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { VoiceOrb } from "@/components/VoiceOrb";
+import { AIntakeDialog } from "@/components/AIntakeDialog";
 import { useState, useMemo } from "react";
 import { 
   Dialog, 
@@ -34,12 +35,13 @@ import {
   Check, 
   AlertTriangle,
   ArrowLeft,
-  User
+  User,
+  RefreshCw
 } from "lucide-react";
 import { Task } from "@/types";
 import { format, isPast, formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 
 export default function MyTasks() {
   const navigate = useNavigate();
@@ -116,9 +118,10 @@ export default function MyTasks() {
 
     const priority = (newTask.urgency * 0.4) + (newTask.impact * 0.4) + ((11 - newTask.effort) * 0.2);
 
+    const user = useAppStore.getState().user;
     const taskData: Task = {
       id: crypto.randomUUID(),
-      userId: 'user',
+      userId: user?.uid || 'user',
       title: newTask.title,
       description: newTask.description,
       deadline: new Date(newTask.deadline).toISOString(),
@@ -201,28 +204,59 @@ export default function MyTasks() {
     return "bg-blue-500/10 text-blue-500 border-blue-500/20";
   };
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const handleSyncCalendar = async () => {
+    setIsSyncing(true);
+    try {
+      const result = await useAppStore.getState().ingestCalendarEvents();
+      if (result.imported > 0) {
+        toast.success(`Successfully imported ${result.imported} tasks from Calendar.`);
+        if (result.emergencies > 0) {
+          toast.warning(`WARNING: ${result.emergencies} upcoming emergency deadline(s) imported!`);
+          useAppStore.getState().setEmergencyMode(true);
+        }
+      } else {
+        toast.info("Calendar is up to date. No new tasks imported.");
+      }
+    } catch (err) {
+      toast.error("Failed to sync with Google Calendar.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
-    <div className="mx-auto max-w-5xl p-6 pb-24 space-y-8 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-slate-900/20 via-transparent to-transparent min-h-screen">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+    <div className="mx-auto max-w-5xl p-6 pb-24 space-y-8 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-slate-200/50 via-transparent to-transparent min-h-screen">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
           <button 
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-emerald-400 transition-colors mb-2 font-mono"
+            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-emerald-600 transition-colors mb-2 font-mono"
           >
             <ArrowLeft className="h-3 w-3" /> Back to Plan
           </button>
-          <h1 className="text-3xl font-light text-white tracking-tight" style={{ fontFamily: "'Georgia', serif" }}>
+          <h1 className="text-3xl font-light text-slate-900 tracking-tight" style={{ fontFamily: "'Georgia', serif" }}>
             My Task Center
           </h1>
-          <p className="text-sm text-slate-400 mt-1">Full administration, creation, and priority tracking.</p>
+          <p className="text-sm text-slate-500 mt-1">Full administration, creation, and priority tracking.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleSyncCalendar}
+            disabled={isSyncing}
+            className="inline-flex items-center justify-center whitespace-nowrap text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 h-9 bg-indigo-600/20 text-indigo-600 border border-indigo-500/30 hover:bg-indigo-600/40 rounded-full px-4 cursor-pointer gap-2"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            Sync Calendar
+          </button>
+          <AIntakeDialog />
+          
           {/* Add Task Button Triggering Dialog */}
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 h-9 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full px-5 cursor-pointer">
               <Plus className="h-4 w-4 mr-2" /> Add New Task
             </DialogTrigger>
-            <DialogContent className="bg-[#111113] border border-slate-800 text-slate-100 sm:max-w-[450px]">
+            <DialogContent className="bg-white border border-slate-200 text-slate-900 sm:max-w-[450px]">
               <DialogHeader>
                 <DialogTitle className="text-xl font-light" style={{ fontFamily: "'Georgia', serif" }}>Create Task Instance</DialogTitle>
               </DialogHeader>
@@ -231,12 +265,14 @@ export default function MyTasks() {
                 className="space-y-4 pt-4"
                 onKeyDown={(e) => {
                   // Platform check: In React, e.key === 'Enter' uniformly covers both the 'Enter' key on Windows and 'Return' on macOS.
-                  // We also ensure shiftKey is not pressed to allow newlines in textareas.
                   if (e.key === 'Enter' && !e.shiftKey) {
+                    // Do not trigger if the user is typing inside a textarea, to allow newlines.
+                    if ((e.target as HTMLElement).tagName.toLowerCase() === 'textarea') {
+                      return;
+                    }
                     // Only activate if the user has entered task details (e.g. title is present)
-                    // and ensure it only fires when inside the form inputs.
                     if (newTask.title.trim() !== '') {
-                      e.preventDefault(); // Do not disrupt other behaviors (like adding a newline)
+                      e.preventDefault(); 
                       const submitBtn = e.currentTarget.querySelector('button[type="submit"]') as HTMLButtonElement | null;
                       if (submitBtn) {
                         submitBtn.click(); // Trigger the Create Task button
@@ -252,7 +288,7 @@ export default function MyTasks() {
                     required 
                     value={newTask.title} 
                     onChange={e => setNewTask({...newTask, title: e.target.value})} 
-                    className="bg-slate-900 border-slate-800 text-slate-100 placeholder-slate-700 focus-visible:ring-emerald-500" 
+                    className="bg-slate-100 border-slate-200 text-slate-900 placeholder-slate-700 focus-visible:ring-emerald-500" 
                     placeholder="e.g. Design app dashboard" 
                   />
                 </div>
@@ -262,7 +298,7 @@ export default function MyTasks() {
                     id="desc" 
                     value={newTask.description} 
                     onChange={e => setNewTask({...newTask, description: e.target.value})} 
-                    className="bg-slate-900 border-slate-800 text-slate-100 placeholder-slate-700 focus-visible:ring-emerald-500 min-h-[80px]" 
+                    className="bg-slate-100 border-slate-200 text-slate-900 placeholder-slate-700 focus-visible:ring-emerald-500 min-h-[80px]" 
                     placeholder="Provide notes, dependencies or context..." 
                   />
                 </div>
@@ -274,7 +310,7 @@ export default function MyTasks() {
                     required 
                     value={newTask.deadline} 
                     onChange={e => setNewTask({...newTask, deadline: e.target.value})} 
-                    className="bg-slate-900 border-slate-800 text-slate-100 focus-visible:ring-emerald-500 [color-scheme:dark]" 
+                    className="bg-slate-100 border-slate-200 text-slate-900 focus-visible:ring-emerald-500 [color-scheme:light]" 
                   />
                 </div>
                 
@@ -287,7 +323,7 @@ export default function MyTasks() {
                       max="10" 
                       value={newTask.urgency} 
                       onChange={e => setNewTask({...newTask, urgency: parseInt(e.target.value)})} 
-                      className="w-full accent-emerald-500 bg-slate-800 h-1 rounded" 
+                      className="w-full accent-emerald-500 bg-slate-200 h-1 rounded" 
                     />
                   </div>
                   <div className="space-y-1">
@@ -298,7 +334,7 @@ export default function MyTasks() {
                       max="10" 
                       value={newTask.impact} 
                       onChange={e => setNewTask({...newTask, impact: parseInt(e.target.value)})} 
-                      className="w-full accent-emerald-500 bg-slate-800 h-1 rounded" 
+                      className="w-full accent-emerald-500 bg-slate-200 h-1 rounded" 
                     />
                   </div>
                   <div className="space-y-1">
@@ -309,13 +345,13 @@ export default function MyTasks() {
                       max="10" 
                       value={newTask.effort} 
                       onChange={e => setNewTask({...newTask, effort: parseInt(e.target.value)})} 
-                      className="w-full accent-emerald-500 bg-slate-800 h-1 rounded" 
+                      className="w-full accent-emerald-500 bg-slate-200 h-1 rounded" 
                     />
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-3 pt-4 border-t border-slate-800/80">
-                  <Button type="button" variant="ghost" onClick={() => setIsAddOpen(false)} className="hover:bg-slate-800 text-slate-400">Cancel</Button>
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-200/80">
+                  <Button type="button" variant="ghost" onClick={() => setIsAddOpen(false)} className="hover:bg-slate-200 text-slate-500">Cancel</Button>
                   <Button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white">Create Task</Button>
                 </div>
               </form>
@@ -325,51 +361,51 @@ export default function MyTasks() {
       </header>
 
       {/* Filters and Search Tools */}
-      <Card className="bg-[#111113]/80 border-slate-800 p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
+      <Card className="bg-white/80 border-slate-200 p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
         <div className="relative w-full md:max-w-xs">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
           <Input 
             placeholder="Search tasks..." 
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="pl-9 bg-slate-900 border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus-visible:ring-emerald-500"
+            className="pl-9 bg-slate-100 border-slate-200 text-sm text-slate-800 placeholder-slate-500 focus-visible:ring-emerald-500"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-1 text-xs">
+          <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-lg p-1 text-xs">
             <button 
               onClick={() => setStatusFilter("all")}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === 'all' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-white'}`}
+              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === 'all' ? 'bg-slate-200 text-emerald-600' : 'text-slate-500 hover:text-slate-900'}`}
             >
               All
             </button>
             <button 
               onClick={() => setStatusFilter("pending")}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === 'pending' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-white'}`}
+              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === 'pending' ? 'bg-slate-200 text-emerald-600' : 'text-slate-500 hover:text-slate-900'}`}
             >
               Pending
             </button>
             <button 
               onClick={() => setStatusFilter("in-progress")}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === 'in-progress' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-white'}`}
+              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === 'in-progress' ? 'bg-slate-200 text-emerald-600' : 'text-slate-500 hover:text-slate-900'}`}
             >
               In Progress
             </button>
             <button 
               onClick={() => setStatusFilter("completed")}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === 'completed' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-white'}`}
+              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === 'completed' ? 'bg-slate-200 text-emerald-600' : 'text-slate-500 hover:text-slate-900'}`}
             >
               Completed
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 ml-auto md:ml-0">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 ml-auto md:ml-0">
             <ArrowUpDown className="h-3.5 w-3.5 text-slate-500" />
             <select 
               value={sortBy} 
               onChange={e => setSortBy(e.target.value as any)}
-              className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             >
               <option value="deadline">Closest Deadline</option>
               <option value="priority">Priority Score</option>
@@ -382,15 +418,15 @@ export default function MyTasks() {
       {/* Critical Priorities List Section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-medium text-slate-200 flex items-center gap-2">
+          <h2 className="text-xl font-medium text-slate-800 flex items-center gap-2">
             <Star className="h-5 w-5 text-amber-500 fill-amber-500/20" />
             Critical Priorities
           </h2>
-          <Badge className="bg-slate-900 text-slate-400 border border-slate-800 font-mono text-xs">
+          <Badge className="bg-slate-100 text-slate-500 border border-slate-200 font-mono text-xs">
             {processedTasks.length} {processedTasks.length === 1 ? 'task' : 'tasks'}
           </Badge>
         </div>
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-500">
           AI-orchestrated strategic roadmap. Click the star icon to set a task as the primary focus, which will lock it into the dashboard's high-efficiency Focus Chamber.
         </p>
 
@@ -411,13 +447,13 @@ export default function MyTasks() {
                 exit={{ opacity: 0, x: -30 }}
                 layout
               >
-                <Card className={`bg-[#111113] border rounded-2xl p-5 flex flex-col gap-4 transition-all hover:bg-[#151518] ${
-                  isPrimary ? 'border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' : 'border-slate-800'
+                <Card className={`bg-white border rounded-2xl p-5 flex flex-col gap-4 transition-all hover:bg-slate-50 ${
+                  isPrimary ? 'border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' : 'border-slate-200'
                 }`}>
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                     <div className="space-y-1.5 flex-1">
                       <div className="flex flex-wrap items-center gap-2.5">
-                        <h3 className="font-medium text-lg text-slate-100">{task.title}</h3>
+                        <h3 className="font-medium text-lg text-slate-900">{task.title}</h3>
                         
                         {task.priorityScore !== undefined && (
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -425,17 +461,17 @@ export default function MyTasks() {
                               Score {(task.priorityScore).toFixed(1)}
                             </Badge>
                             {task.urgency !== undefined && (
-                              <span className="text-[10px] bg-slate-900 border border-slate-800/80 text-slate-400 rounded px-1.5 py-0.5 font-mono flex items-center gap-0.5" title="Urgency (1-10)">
+                              <span className="text-[10px] bg-slate-100 border border-slate-200/80 text-slate-500 rounded px-1.5 py-0.5 font-mono flex items-center gap-0.5" title="Urgency (1-10)">
                                 ⚡ Urg: {task.urgency}
                               </span>
                             )}
                             {task.impact !== undefined && (
-                              <span className="text-[10px] bg-slate-900 border border-slate-800/80 text-slate-400 rounded px-1.5 py-0.5 font-mono flex items-center gap-0.5" title="Impact (1-10)">
+                              <span className="text-[10px] bg-slate-100 border border-slate-200/80 text-slate-500 rounded px-1.5 py-0.5 font-mono flex items-center gap-0.5" title="Impact (1-10)">
                                 🎯 Imp: {task.impact}
                               </span>
                             )}
                             {task.effort !== undefined && (
-                              <span className="text-[10px] bg-slate-900 border border-slate-800/80 text-slate-400 rounded px-1.5 py-0.5 font-mono flex items-center gap-0.5" title="Effort (1-10)">
+                              <span className="text-[10px] bg-slate-100 border border-slate-200/80 text-slate-500 rounded px-1.5 py-0.5 font-mono flex items-center gap-0.5" title="Effort (1-10)">
                                 🏋️ Eff: {task.effort}
                               </span>
                             )}
@@ -443,9 +479,9 @@ export default function MyTasks() {
                         )}
 
                         <Badge variant="outline" className={`capitalize ${
-                          task.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                          task.status === 'completed' ? 'bg-emerald-100 text-emerald-600 border-emerald-500/20' :
                           task.status === 'in-progress' ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' :
-                          'bg-slate-800 text-slate-400 border-slate-700/50'
+                          'bg-slate-200 text-slate-500 border-slate-700/50'
                         }`}>
                           {task.status}
                         </Badge>
@@ -458,11 +494,11 @@ export default function MyTasks() {
                         )}
                       </div>
 
-                      <p className="text-sm text-slate-400 line-clamp-2">{task.description || "No description provided."}</p>
+                      <p className="text-sm text-slate-500 line-clamp-2">{task.description || "No description provided."}</p>
 
                       <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-slate-500 pt-1">
                         <span className="flex items-center gap-1">
-                          <Calendar className="h-3.5 w-3.5 text-slate-400" />
+                          <Calendar className="h-3.5 w-3.5 text-slate-500" />
                           Deadline: {!isNaN(deadline.getTime()) ? format(deadline, "MMM d, h:mm a") : "N/A"}
                         </span>
                         {!isNaN(deadline.getTime()) && (
@@ -494,7 +530,7 @@ export default function MyTasks() {
                       <Button 
                         variant="ghost" 
                         size="icon"
-                        className="rounded-full text-slate-500 hover:text-emerald-400"
+                        className="rounded-full text-slate-500 hover:text-emerald-600"
                         onClick={() => {
                           setEditingTask({
                             ...task,
@@ -511,7 +547,7 @@ export default function MyTasks() {
                       <Button 
                         variant="ghost" 
                         size="icon"
-                        className={`rounded-full ${task.status === 'completed' ? 'text-emerald-500' : 'text-slate-500 hover:text-emerald-400'}`}
+                        className={`rounded-full ${task.status === 'completed' ? 'text-emerald-500' : 'text-slate-500 hover:text-emerald-600'}`}
                         onClick={() => {
                           const nextStatus = task.status === 'completed' ? 'pending' : 'completed';
                           updateTask(task.id, { status: nextStatus });
@@ -546,7 +582,7 @@ export default function MyTasks() {
 
                   {/* Subtask Section */}
                   {totalSub > 0 && (
-                    <div className="space-y-2 border-t border-slate-800/60 pt-3">
+                    <div className="space-y-2 border-t border-slate-200/60 pt-3">
                       <div className="flex items-center justify-between text-xs font-mono text-slate-500">
                         <span>Planning Progress ({completedSub}/{totalSub} steps)</span>
                         <span>{Math.round(progress)}%</span>
@@ -566,7 +602,7 @@ export default function MyTasks() {
                             >
                               {sub.completed ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : <Circle className="h-3.5 w-3.5" />}
                             </button>
-                            <span className={`flex-1 ${sub.completed ? 'text-slate-600 line-through' : 'text-slate-300'}`}>
+                            <span className={`flex-1 ${sub.completed ? 'text-slate-600 line-through' : 'text-slate-700'}`}>
                               {sub.title}
                             </span>
                             <span className="font-mono text-[10px] text-slate-500">{sub.estimatedMinutes}m</span>
@@ -577,7 +613,7 @@ export default function MyTasks() {
                   )}
 
                   {task.agentLogs && (
-                    <div className="pt-3 border-t border-slate-800/60 mt-3">
+                    <div className="pt-3 border-t border-slate-200/60 mt-3">
                       <button
                         onClick={() => setExpandedAgentLogs(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
                         className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 font-medium font-mono transition-colors"
@@ -586,8 +622,8 @@ export default function MyTasks() {
                         {expandedAgentLogs[task.id] ? 'Hide Agent Collaboration Logs' : 'View Agent Collaboration Logs'}
                       </button>
                       {expandedAgentLogs[task.id] && (
-                        <div className="mt-3 space-y-3 bg-slate-950/50 border border-slate-800/80 rounded-lg p-3 text-xs max-h-60 overflow-y-auto">
-                          <div className="flex items-center gap-1.5 border-b border-slate-800 pb-1.5 text-[10px] uppercase font-mono tracking-wider text-slate-400">
+                        <div className="mt-3 space-y-3 bg-slate-50/50 border border-slate-200/80 rounded-lg p-3 text-xs max-h-60 overflow-y-auto">
+                          <div className="flex items-center gap-1.5 border-b border-slate-200 pb-1.5 text-[10px] uppercase font-mono tracking-wider text-slate-500">
                             <Network className="h-3 w-3 text-cyan-400 animate-pulse" />
                             <span>Multi-Agent Collaboration Board</span>
                           </div>
@@ -596,37 +632,37 @@ export default function MyTasks() {
                               <div className="font-mono text-[10px] text-cyan-400 font-semibold uppercase">
                                 👁️ Perceiving agent
                               </div>
-                              <p className="text-slate-300 leading-relaxed pl-3 border-l border-cyan-500/20">{task.agentLogs.perceivingAgentLog}</p>
+                              <p className="text-slate-700 leading-relaxed pl-3 border-l border-cyan-500/20">{task.agentLogs.perceivingAgentLog}</p>
                             </div>
                             <div className="space-y-1">
-                              <div className="font-mono text-[10px] text-indigo-400 font-semibold uppercase">
+                              <div className="font-mono text-[10px] text-indigo-600 font-semibold uppercase">
                                 ⚖️ Prioritizing agent
                               </div>
-                              <p className="text-slate-300 leading-relaxed pl-3 border-l border-indigo-500/20">{task.agentLogs.prioritizingAgentLog}</p>
+                              <p className="text-slate-700 leading-relaxed pl-3 border-l border-indigo-500/20">{task.agentLogs.prioritizingAgentLog}</p>
                             </div>
                             <div className="space-y-1">
                               <div className="font-mono text-[10px] text-pink-400 font-semibold uppercase">
                                 🧩 Decomposing Agent
                               </div>
-                              <p className="text-slate-300 leading-relaxed pl-3 border-l border-pink-500/20">{task.agentLogs.decomposingAgentLog}</p>
+                              <p className="text-slate-700 leading-relaxed pl-3 border-l border-pink-500/20">{task.agentLogs.decomposingAgentLog}</p>
                             </div>
                             <div className="space-y-1">
                               <div className="font-mono text-[10px] text-amber-400 font-semibold uppercase">
                                 🗺️ Planning agent
                               </div>
-                              <p className="text-slate-300 leading-relaxed pl-3 border-l border-amber-500/20">{task.agentLogs.planningAgentLog}</p>
+                              <p className="text-slate-700 leading-relaxed pl-3 border-l border-amber-500/20">{task.agentLogs.planningAgentLog}</p>
                             </div>
                             <div className="space-y-1">
-                              <div className="font-mono text-[10px] text-emerald-400 font-semibold uppercase">
+                              <div className="font-mono text-[10px] text-emerald-600 font-semibold uppercase">
                                 🤖 Autonomous task automation agent
                               </div>
-                              <p className="text-slate-300 leading-relaxed pl-3 border-l border-emerald-500/20">{task.agentLogs.autonomousAutomationLog}</p>
+                              <p className="text-slate-700 leading-relaxed pl-3 border-l border-emerald-500/20">{task.agentLogs.autonomousAutomationLog}</p>
                             </div>
                             <div className="space-y-1">
                               <div className="font-mono text-[10px] text-purple-400 font-semibold uppercase">
                                 👑 Orchestrating agent
                               </div>
-                              <p className="text-slate-300 leading-relaxed pl-3 border-l border-purple-500/20">{task.agentLogs.orchestratingAgentLog}</p>
+                              <p className="text-slate-700 leading-relaxed pl-3 border-l border-purple-500/20">{task.agentLogs.orchestratingAgentLog}</p>
                             </div>
                           </div>
                         </div>
@@ -640,12 +676,12 @@ export default function MyTasks() {
         </AnimatePresence>
 
         {processedTasks.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 bg-[#111113]/40 border border-dashed border-slate-800 rounded-2xl">
-            <div className="h-12 w-12 rounded-full bg-slate-800/60 flex items-center justify-center text-slate-500">
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 bg-white/40 border border-dashed border-slate-200 rounded-2xl">
+            <div className="h-12 w-12 rounded-full bg-slate-200/60 flex items-center justify-center text-slate-500">
               <CheckCircle2 className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-slate-300 font-medium">No tasks match criteria</p>
+              <p className="text-slate-700 font-medium">No tasks match criteria</p>
               <p className="text-slate-500 text-xs mt-1">Try adjusting the status filter or create a new task.</p>
             </div>
           </div>
@@ -655,7 +691,7 @@ export default function MyTasks() {
 
       {/* Editing Dialog Modal */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="bg-[#111113] border border-slate-800 text-slate-100 sm:max-w-[450px]">
+        <DialogContent className="bg-white border border-slate-200 text-slate-900 sm:max-w-[450px]">
           <DialogHeader>
             <DialogTitle className="text-xl font-light" style={{ fontFamily: "'Georgia', serif" }}>Edit Task Properties</DialogTitle>
           </DialogHeader>
@@ -668,7 +704,7 @@ export default function MyTasks() {
                   required 
                   value={editingTask.title} 
                   onChange={e => setEditingTask({...editingTask, title: e.target.value})} 
-                  className="bg-slate-900 border-slate-800 text-slate-100 focus-visible:ring-emerald-500" 
+                  className="bg-slate-100 border-slate-200 text-slate-900 focus-visible:ring-emerald-500" 
                 />
               </div>
               <div className="space-y-1.5">
@@ -677,7 +713,7 @@ export default function MyTasks() {
                   id="edit-desc" 
                   value={editingTask.description} 
                   onChange={e => setEditingTask({...editingTask, description: e.target.value})} 
-                  className="bg-slate-900 border-slate-800 text-slate-100 focus-visible:ring-emerald-500 min-h-[80px]" 
+                  className="bg-slate-100 border-slate-200 text-slate-900 focus-visible:ring-emerald-500 min-h-[80px]" 
                 />
               </div>
               <div className="space-y-1.5">
@@ -688,7 +724,7 @@ export default function MyTasks() {
                   required 
                   value={editingTask.deadline} 
                   onChange={e => setEditingTask({...editingTask, deadline: e.target.value})} 
-                  className="bg-slate-900 border-slate-800 text-slate-100 focus-visible:ring-emerald-500 [color-scheme:dark]" 
+                  className="bg-slate-100 border-slate-200 text-slate-900 focus-visible:ring-emerald-500 [color-scheme:light]" 
                 />
               </div>
               
@@ -697,7 +733,7 @@ export default function MyTasks() {
                 <select 
                   value={editingTask.status} 
                   onChange={e => setEditingTask({...editingTask, status: e.target.value as any})}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-sm"
+                  className="w-full bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-sm"
                 >
                   <option value="pending">Pending</option>
                   <option value="in-progress">In Progress</option>
@@ -715,7 +751,7 @@ export default function MyTasks() {
                     max="10" 
                     value={editingTask.urgency || 5} 
                     onChange={e => setEditingTask({...editingTask, urgency: parseInt(e.target.value)})} 
-                    className="w-full accent-emerald-500 bg-slate-800 h-1 rounded" 
+                    className="w-full accent-emerald-500 bg-slate-200 h-1 rounded" 
                   />
                 </div>
                 <div className="space-y-1">
@@ -726,7 +762,7 @@ export default function MyTasks() {
                     max="10" 
                     value={editingTask.impact || 5} 
                     onChange={e => setEditingTask({...editingTask, impact: parseInt(e.target.value)})} 
-                    className="w-full accent-emerald-500 bg-slate-800 h-1 rounded" 
+                    className="w-full accent-emerald-500 bg-slate-200 h-1 rounded" 
                   />
                 </div>
                 <div className="space-y-1">
@@ -737,13 +773,13 @@ export default function MyTasks() {
                     max="10" 
                     value={editingTask.effort || 5} 
                     onChange={e => setEditingTask({...editingTask, effort: parseInt(e.target.value)})} 
-                    className="w-full accent-emerald-500 bg-slate-800 h-1 rounded" 
+                    className="w-full accent-emerald-500 bg-slate-200 h-1 rounded" 
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800/80">
-                <Button type="button" variant="ghost" onClick={() => setIsEditOpen(false)} className="hover:bg-slate-800 text-slate-400">Cancel</Button>
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200/80">
+                <Button type="button" variant="ghost" onClick={() => setIsEditOpen(false)} className="hover:bg-slate-200 text-slate-500">Cancel</Button>
                 <Button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white">Save Changes</Button>
               </div>
             </form>

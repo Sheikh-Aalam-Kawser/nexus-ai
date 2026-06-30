@@ -7,7 +7,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const PORT = 3000;
 
 // Helper to get Gemini AI Client dynamically (allows client-supplied API key or OAuth access token)
@@ -241,7 +242,7 @@ app.post("/api/agents/execute", async (req, res) => {
       model: "gemini-2.5-flash",
       contents: `Action: ${actionType}\nDetails: ${JSON.stringify(details)}`,
       config: {
-        systemInstruction: "You are the NEXUS Execution Agent. Draft an email or calendar event description based on the request.",
+        systemInstruction: "You are the NEXUS Execution Agent. Draft an email, document, action plan, code, outline, or calendar event description based on the request.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -253,6 +254,42 @@ app.post("/api/agents/execute", async (req, res) => {
       }
     });
     res.json(JSON.parse(response.text || '{}'));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 5b. Dynamic Actions Generator (Action Center)
+// ---------------------------------------------------------------------------
+app.post("/api/agents/dynamic_actions", async (req, res) => {
+  const { taskTitle, taskDescription } = req.body;
+  try {
+    const aiInstance = getAIClient(req);
+    const response = await aiInstance.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Task Title: ${taskTitle}\nTask Description: ${taskDescription || 'None'}`,
+      config: {
+        systemInstruction: "You are the NEXUS Action Generation Agent. Based on the task context, suggest exactly 3 unique, specific, and highly helpful 'supportive actions' that an AI could perform on behalf of the user to accelerate their work when a deadline is imminent. Examples: creating flashcards for studying, generating boilerplate code for software tasks, drafting an essay outline, compiling references, etc. Return them as a JSON array of objects.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING, description: "A unique identifier string without spaces, e.g. 'generate_summary'" },
+              label: { type: Type.STRING, description: "A short button label, e.g. 'Draft Summary'" },
+              actionText: { type: Type.STRING, description: "Action completion phrase, e.g. 'draft a summary of the topic'" },
+              needsCreds: { type: Type.BOOLEAN, description: "True if it requires external API access like Google Docs/Drive, False if it just generates text/code locally." },
+              completionText: { type: Type.STRING, description: "Text to show when done, e.g. 'Your summary is ready.'" },
+              outputMock: { type: Type.STRING, description: "A short placeholder text of what the output would look like, e.g. 'Summary: This is a placeholder summary...'" }
+            },
+            required: ["id", "label", "actionText", "needsCreds", "completionText", "outputMock"]
+          }
+        }
+      }
+    });
+    res.json(JSON.parse(response.text || '[]'));
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -419,6 +456,67 @@ Current Time: ${new Date().toISOString()}`,
   } catch (error: any) {
     console.error("Plan generation API error:", error);
     res.status(500).json({ error: error.message || "Failed to generate plan." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 8. AI-Driven Intake Agent
+// ---------------------------------------------------------------------------
+app.post("/api/agents/intake", async (req, res) => {
+  const { prompt, document } = req.body;
+  
+  try {
+    const aiInstance = getAIClient(req);
+    const contents: any[] = [];
+    
+    if (document) {
+      // document should have { inlineData: { data: string, mimeType: string } }
+      contents.push({
+        role: "user",
+        parts: [
+          document,
+          { text: "Analyze the attached document." }
+        ]
+      });
+    }
+    
+    let textPrompt = prompt || "Analyze this task request.";
+    contents.push({
+      role: "user",
+      parts: [{ text: `Current Time: ${new Date().toISOString()}\n\nRequest: ${textPrompt}` }]
+    });
+
+    const response = await aiInstance.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents,
+      config: {
+        systemInstruction: "You are the NEXUS AI Intake Agent. You extract task deadlines and calculate priority scores from frantic prompts and/or syllabus documents. Return an array of tasks. Priority score should be between 1 and 100 based on urgency and importance.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            tasks: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  deadline: { type: Type.STRING, description: "ISO 8601 formatted date if present" },
+                  priorityScore: { type: Type.NUMBER, description: "Calculated from 1-100 based on urgency" }
+                },
+                required: ["title", "priorityScore"]
+              }
+            }
+          },
+          required: ["tasks"]
+        }
+      }
+    });
+    res.json(JSON.parse(response.text || '{}'));
+  } catch (error: any) {
+    console.error("AI Intake parsing error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 

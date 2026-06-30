@@ -10,6 +10,7 @@ import NavBar from './components/NavBar';
 import { Toaster } from '@/components/ui/sonner';
 import { initAuth } from './lib/firebase';
 import { FocusPlanPopup } from './components/FocusPlanPopup';
+import { DistractionBlocker } from './components/DistractionBlocker';
 
 export default function App() {
   const { user, tasks, autoEvaluatePrioritiesAndFocus, setUser } = useAppStore();
@@ -21,6 +22,18 @@ export default function App() {
       (user) => {
         setUser({ uid: user.uid, displayName: user.displayName, email: user.email });
         setAuthInitialized(true);
+        // Auto-ingest calendar events in the background
+        useAppStore.getState().ingestCalendarEvents().then((result) => {
+          if (result.imported > 0) {
+            import('sonner').then(({ toast }) => {
+              toast.success(`NEXUS Auto-Sync: Imported ${result.imported} tasks from Calendar.`);
+              if (result.emergencies > 0) {
+                toast.warning(`WARNING: ${result.emergencies} upcoming emergency deadline(s) detected!`);
+                useAppStore.getState().setEmergencyMode(true);
+              }
+            });
+          }
+        });
       },
       () => {
         setUser(null);
@@ -35,11 +48,11 @@ export default function App() {
   }, [tasks.length, autoEvaluatePrioritiesAndFocus]);
 
   if (!authInitialized) {
-    return <div className="min-h-screen bg-[#09090b] flex items-center justify-center text-slate-500">Loading...</div>;
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500">Loading...</div>;
   }
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-slate-100 font-sans selection:bg-emerald-500/30 flex flex-col">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-emerald-500/30 flex flex-col">
       <NavBar />
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -49,7 +62,8 @@ export default function App() {
         <Route path="/profile" element={user ? <Profile /> : <Navigate to="/" />} />
       </Routes>
       <FocusPlanPopup />
-      <Toaster theme="dark" />
+      <DistractionBlocker />
+      <Toaster theme="light" />
     </div>
   );
 }

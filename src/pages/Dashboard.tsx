@@ -8,7 +8,37 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { VoiceOrb } from "@/components/VoiceOrb";
+import { AIntakeDialog } from "@/components/AIntakeDialog";
 import { useState, useEffect } from "react";
+
+// Real-time Subtask Timer for 30-minute intervals
+function SubtaskTimer({ subtaskId }: { subtaskId: string }) {
+  const [timeLeft, setTimeLeft] = useState(30 * 60); // 30 minutes in seconds
+
+  useEffect(() => {
+    // Reset timer when active subtask changes
+    setTimeLeft(30 * 60);
+  }, [subtaskId]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [subtaskId]);
+
+  const isBehind = timeLeft < 0;
+  const absTime = Math.abs(timeLeft);
+  const minutes = Math.floor(absTime / 60);
+  const seconds = absTime % 60;
+  const formatted = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
+  return (
+    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${isBehind ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-emerald-100 text-emerald-600'}`}>
+      {isBehind ? '-' : ''}{formatted}
+    </span>
+  );
+}
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { 
   Clock, 
@@ -37,19 +67,22 @@ import {
 } from "lucide-react";
 import { Task } from "@/types";
 import { format, isPast, formatDistanceToNow } from "date-fns";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { useNavigate } from "react-router-dom";
 
 // Real-time Countdown Timer for Focus Task
-function DeadlineTimer({ deadlineStr }: { deadlineStr: string }) {
+function DeadlineTimer({ deadlineStr, onEmergency }: { deadlineStr: string, onEmergency?: () => void }) {
   const [timeLeft, setTimeLeft] = useState("");
   const [isOverdue, setIsOverdue] = useState(false);
+  const [isEmergency, setIsEmergency] = useState(false);
 
   useEffect(() => {
     const calculateTime = () => {
       const difference = +new Date(deadlineStr) - +new Date();
       if (difference <= 0) {
         setIsOverdue(true);
+        setIsEmergency(true);
+        if (onEmergency) onEmergency();
         const overdueMs = Math.abs(difference);
         const hours = Math.floor(overdueMs / (1000 * 60 * 60));
         const minutes = Math.floor((overdueMs / 1000 / 60) % 60);
@@ -64,6 +97,14 @@ function DeadlineTimer({ deadlineStr }: { deadlineStr: string }) {
       const minutes = Math.floor((difference / 1000 / 60) % 60);
       const seconds = Math.floor((difference / 1000) % 60);
       
+      const totalMinutesLeft = (difference / 1000 / 60);
+      if (totalMinutesLeft < 30) {
+        setIsEmergency(true);
+        if (onEmergency) onEmergency();
+      } else {
+        setIsEmergency(false);
+      }
+
       let str = "";
       if (days > 0) str += `${days}d `;
       if (hours > 0 || days > 0) str += `${hours}h `;
@@ -74,17 +115,26 @@ function DeadlineTimer({ deadlineStr }: { deadlineStr: string }) {
     calculateTime();
     const interval = setInterval(calculateTime, 1000);
     return () => clearInterval(interval);
-  }, [deadlineStr]);
+  }, [deadlineStr, onEmergency]);
 
   return (
-    <div className={`font-mono text-lg font-bold px-3 py-1.5 rounded-lg border tracking-wide ${
-      isOverdue 
-        ? 'bg-red-500/10 text-red-400 border-red-500/30 animate-pulse' 
-        : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+    <div className={`font-mono text-xl font-bold px-4 py-2 rounded-xl border tracking-wide transition-colors ${
+      isOverdue || isEmergency
+        ? 'bg-red-500/10 text-red-600 border-red-500/30 animate-pulse' 
+        : 'bg-slate-100 text-slate-800 border-slate-200'
     }`}>
       {timeLeft}
     </div>
   );
+}
+
+interface DynamicAction {
+  id: string;
+  label: string;
+  actionText: string;
+  needsCreds: boolean;
+  completionText: string;
+  outputMock: string;
 }
 
 export default function Dashboard() {
@@ -102,15 +152,19 @@ export default function Dashboard() {
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newTask, setNewTask] = useState({ title: '', description: '', deadline: '' });
-  const [expandedAgentLogs, setExpandedAgentLogs] = useState<Record<string, boolean>>({});
 
   // States for Perceive, Plan, and Act requirements
   const [activeNudge, setActiveNudge] = useState<{ message: string; suggestedAction: string } | null>(null);
   const [isFetchingNudge, setIsFetchingNudge] = useState(false);
-  const [activeActionType, setActiveActionType] = useState<'email' | 'calendar' | 'local' | null>(null);
+  const [activeActionType, setActiveActionType] = useState<string | null>(null);
   const [actionOutput, setActionOutput] = useState<string>("");
   const [isExecutingAction, setIsExecutingAction] = useState(false);
   const [isOrchestrating, setIsOrchestrating] = useState(false);
+  const [helperState, setHelperState] = useState<'idle' | 'asking' | 'need_creds' | 'done'>('idle');
+  const [helperSelectedAction, setHelperSelectedAction] = useState<DynamicAction | null>(null);
+  const [helperToken, setHelperToken] = useState("");
+  const [dynamicActionsList, setDynamicActionsList] = useState<DynamicAction[]>([]);
+  const [isFetchingActions, setIsFetchingActions] = useState(false);
 
   // Derive task states
   const pendingTasks = tasks.filter(t => t.status !== 'completed').sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0));
@@ -122,15 +176,45 @@ export default function Dashboard() {
   const completionPercentage = totalTasksCount > 0 ? (completedTasksCount / totalTasksCount) * 100 : 0;
   const overdueTasksCount = tasks.filter(t => t.status !== 'completed' && t.deadline && isPast(new Date(t.deadline))).length;
 
-  // Auto-detect high urgency deadlines (less than 12 hours remaining) to recommend Emergency Mode
-  const hasImminentDeadline = tasks.some(t => {
-    if (t.status === 'completed' || !t.deadline) return false;
-    const diffHours = (new Date(t.deadline).getTime() - Date.now()) / (1000 * 60 * 60);
-    return diffHours > 0 && diffHours < 12;
-  });
 
   // Find the primary focus task if it is set and still pending
   const focusTask = tasks.find(t => t.id === primaryFocusTaskId && t.status !== 'completed');
+
+  useEffect(() => {
+    if (!focusTask) return;
+    const hoursLeft = (new Date(focusTask.deadline).getTime() - Date.now()) / (1000 * 60 * 60);
+    const hyperUrgent = hoursLeft > 0 && hoursLeft <= 1;
+    
+    if ((hyperUrgent || emergencyMode) && dynamicActionsList.length === 0 && !isFetchingActions) {
+      setIsFetchingActions(true);
+      fetch('/api/agents/dynamic_actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskTitle: focusTask.title, taskDescription: focusTask.description })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setDynamicActionsList(data);
+        } else {
+          // Fallback if AI fails to parse
+          setDynamicActionsList([
+            { id: 'generate_doc', label: 'Generate Summary', actionText: 'generate a summary and add it to your Google Drive', needsCreds: true, completionText: 'Your document has been created.', outputMock: 'Google Doc Generated: "Summary"' },
+            { id: 'create_action_plan', label: 'Create Action Plan', actionText: 'create a detailed action plan', needsCreds: false, completionText: 'Your action plan is ready.', outputMock: 'Action Plan:\n1. Execute phase 1.' }
+          ]);
+        }
+      })
+      .catch(() => {
+        setDynamicActionsList([
+            { id: 'generate_doc', label: 'Generate Summary', actionText: 'generate a summary and add it to your Google Drive', needsCreds: true, completionText: 'Your document has been created.', outputMock: 'Google Doc Generated: "Summary"' },
+            { id: 'create_action_plan', label: 'Create Action Plan', actionText: 'create a detailed action plan', needsCreds: false, completionText: 'Your action plan is ready.', outputMock: 'Action Plan:\n1. Execute phase 1.' }
+        ]);
+      })
+      .finally(() => {
+        setIsFetchingActions(false);
+      });
+    }
+  }, [focusTask, emergencyMode, dynamicActionsList.length, isFetchingActions]);
 
   const handleAddTask = (e: React.FormEvent) => {
     e.preventDefault();
@@ -313,7 +397,7 @@ export default function Dashboard() {
   };
 
   // 3. Act: Autonomous actions execution drafts
-  const handleRunAction = async (actionType: 'email' | 'calendar' | 'local') => {
+  const handleRunAction = async (actionType: string, fallbackMock?: string) => {
     if (!focusTask) return;
     setIsExecutingAction(true);
     setActionOutput("");
@@ -347,6 +431,18 @@ export default function Dashboard() {
         fallback = `Subject: Progress Update on ${focusTask.title}\n\nHi team,\n\nI am currently working on "${focusTask.title}". Here are the active planning steps I'm focused on:\n${(focusTask.subtasks || []).map(s => `- ${s.title} (${s.completed ? 'Done' : 'Pending'})`).join('\n')}\n\nI am tracking towards the deadline: ${new Date(focusTask.deadline).toLocaleString()}.\n\nBest regards,\nUser`;
       } else if (actionType === 'calendar') {
         fallback = `Calendar Block for ${focusTask.title}\n\nDescription: Dedicated focus session to execute pending steps:\n${(focusTask.subtasks || []).map(s => `- ${s.title}`).join('\n')}`;
+      } else if (fallbackMock) {
+        fallback = fallbackMock;
+      } else if (actionType === 'create_flashcards') {
+        fallback = `Flashcards Generated for ${focusTask.title}:\n\n1. Front: Key Concept 1\n   Back: Definition and details.\n2. Front: Core Argument\n   Back: Supporting evidence.`;
+      } else if (actionType === 'generate_doc') {
+        fallback = `Google Doc Generated: "Notes on ${focusTask.title}"\n[Link: https://docs.google.com/document/d/fake-doc-id-123]`;
+      } else if (actionType === 'essay_outline') {
+        fallback = `Essay Outline: ${focusTask.title}\n\nI. Introduction\nII. Core Argument\nIII. Supporting Evidence\nIV. Conclusion\n\n(Generated via Emergency Mode)`;
+      } else if (actionType === 'draft_final') {
+        fallback = `Final Submission Draft for ${focusTask.title}\n\n[Body of the submission goes here. Make sure to review before submitting.]`;
+      } else if (actionType === 'export_deliverable') {
+        fallback = `Deliverable Package Ready for ${focusTask.title}\n\nContents: Final document, references, and logs.`;
       } else {
         fallback = `System Manifest: Task focus blocks execution trigger initiated.\n- Title: ${focusTask.title}\n- Deadline: ${new Date(focusTask.deadline).toLocaleString()}`;
       }
@@ -389,68 +485,16 @@ export default function Dashboard() {
     toast.success("Google Calendar event draft opened!");
   };
 
-  // 6. Act: Local ICS File generator download
-  const triggerICSDownload = () => {
-    if (!focusTask) return;
-    const title = focusTask.title;
-    const dateObj = new Date(focusTask.deadline);
-    const startObj = new Date(dateObj.getTime() - 60 * 60 * 1000);
-    
-    const formatDateICS = (d: Date) => d.toISOString().replace(/-|:|\.\d\d\d/g, "");
-    
-    const icsContent = `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//NEXUS Deadline Guardian//EN
-BEGIN:VEVENT
-UID:${focusTask.id}
-DTSTAMP:${formatDateICS(new Date())}
-DTSTART:${formatDateICS(startObj)}
-DTEND:${formatDateICS(dateObj)}
-SUMMARY:${title}
-DESCRIPTION:${actionOutput.replace(/\n/g, '\\n')}
-STATUS:CONFIRMED
-END:VEVENT
-END:VCALENDAR`;
-
-    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `${title.toLowerCase().replace(/\s+/g, '_')}_focus_block.ics`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success("Focus block event ICS file downloaded successfully!");
-  };
-
   const { insights } = useAppStore();
 
   return (
-    <div className="mx-auto max-w-5xl p-6 pb-24 space-y-8 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-slate-900/20 via-transparent to-transparent min-h-screen">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+    <div className="mx-auto max-w-5xl p-6 pb-24 space-y-8 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-slate-200/50 via-transparent to-transparent min-h-screen">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-white">Today's Plan</h1>
-          <p className="text-sm text-slate-400">Welcome back. You have {pendingTasks.length} pending tasks today.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Today's Plan</h1>
+          <p className="text-sm text-slate-500">Welcome back. You have {pendingTasks.length} pending tasks today.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {/* Emergency Mode Manual Toggle */}
-          <Button 
-            variant="outline" 
-            onClick={() => {
-              setEmergencyMode(!emergencyMode);
-              toast(emergencyMode ? "Emergency Mode disengaged." : "Emergency Mode engaged! Focus solely on high-priority deadlines.", {
-                icon: <ShieldAlert className={emergencyMode ? "text-slate-400" : "text-red-500 animate-pulse"} />
-              });
-            }}
-            className={`transition-all border font-mono text-xs rounded-full px-4 h-9 ${
-              emergencyMode 
-                ? 'bg-red-500/10 text-red-400 border-red-500/40 hover:bg-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.2)]' 
-                : 'text-slate-400 hover:text-white border-slate-800 hover:bg-slate-800'
-            }`}
-          >
-            <ShieldAlert className={`h-4 w-4 mr-1.5 ${emergencyMode ? 'text-red-500 animate-pulse' : 'text-slate-400'}`} />
-            Emergency
-          </Button>
-
           {/* Plan: Global AI Orchestrator */}
           <Button 
             variant="outline" 
@@ -462,13 +506,15 @@ END:VCALENDAR`;
             Orchestrate Plan
           </Button>
 
+          <AIntakeDialog />
+
           {/* Create Task Modal Button */}
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger className="inline-flex items-center justify-center whitespace-nowrap text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 h-9 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full px-5 cursor-pointer">
               <Plus className="h-4 w-4 mr-1.5" />
               Add Task
             </DialogTrigger>
-            <DialogContent className="bg-[#111113] border border-slate-800 text-slate-100 sm:max-w-[425px]">
+            <DialogContent className="bg-white border border-slate-200 text-slate-900 sm:max-w-[425px]">
               <DialogHeader>
                 <DialogTitle className="text-xl font-light" style={{ fontFamily: "'Georgia', serif" }}>Create New Task</DialogTitle>
               </DialogHeader>
@@ -477,12 +523,14 @@ END:VCALENDAR`;
                 className="space-y-5 pt-4"
                 onKeyDown={(e) => {
                   // Platform check: In React, e.key === 'Enter' uniformly covers both the 'Enter' key on Windows and 'Return' on macOS.
-                  // We also ensure shiftKey is not pressed to allow newlines in textareas.
                   if (e.key === 'Enter' && !e.shiftKey) {
+                    // Do not trigger if the user is typing inside a textarea, to allow newlines.
+                    if ((e.target as HTMLElement).tagName.toLowerCase() === 'textarea') {
+                      return;
+                    }
                     // Only activate if the user has entered task details (e.g. title is present)
-                    // and ensure it only fires when inside the form inputs.
                     if (newTask.title.trim() !== '') {
-                      e.preventDefault(); // Do not disrupt other behaviors (like adding a newline)
+                      e.preventDefault(); 
                       const submitBtn = e.currentTarget.querySelector('button[type="submit"]') as HTMLButtonElement | null;
                       if (submitBtn) {
                         submitBtn.click(); // Trigger the Create Task button
@@ -493,18 +541,18 @@ END:VCALENDAR`;
               >
                 <div className="space-y-2">
                   <Label htmlFor="title" className="text-[10px] uppercase tracking-widest text-slate-500">Task Title</Label>
-                  <Input id="title" value={newTask.title} onChange={e => setNewTask({...newTask, title: e.target.value})} className="bg-slate-900 border-slate-800 focus-visible:ring-emerald-500 text-slate-100" placeholder="e.g. Complete quarterly report" />
+                  <Input id="title" value={newTask.title} onChange={e => setNewTask({...newTask, title: e.target.value})} className="bg-slate-100 border-slate-200 focus-visible:ring-emerald-500 text-slate-900" placeholder="e.g. Complete quarterly report" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="description" className="text-[10px] uppercase tracking-widest text-slate-500">Description</Label>
-                  <Textarea id="description" value={newTask.description} onChange={e => setNewTask({...newTask, description: e.target.value})} className="bg-slate-900 border-slate-800 focus-visible:ring-emerald-500 text-slate-100 placeholder:text-slate-700" placeholder="Brief details about the task..." />
+                  <Textarea id="description" value={newTask.description} onChange={e => setNewTask({...newTask, description: e.target.value})} className="bg-slate-100 border-slate-200 focus-visible:ring-emerald-500 text-slate-900 placeholder:text-slate-700" placeholder="Brief details about the task..." />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="deadline" className="text-[10px] uppercase tracking-widest text-slate-500">Deadline</Label>
-                  <Input id="deadline" type="datetime-local" value={newTask.deadline} onChange={e => setNewTask({...newTask, deadline: e.target.value})} className="bg-slate-900 border-slate-800 focus-visible:ring-emerald-500 text-slate-100 [color-scheme:dark]" />
+                  <Input id="deadline" type="datetime-local" value={newTask.deadline} onChange={e => setNewTask({...newTask, deadline: e.target.value})} className="bg-slate-100 border-slate-200 focus-visible:ring-emerald-500 text-slate-900 [color-scheme:light]" />
                 </div>
                 <div className="flex justify-end gap-3 pt-4">
-                  <Button type="button" variant="ghost" onClick={() => setIsAddOpen(false)} className="hover:bg-slate-800 text-slate-400">Cancel</Button>
+                  <Button type="button" variant="ghost" onClick={() => setIsAddOpen(false)} className="hover:bg-slate-200 text-slate-500">Cancel</Button>
                   <Button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white">Create Task</Button>
                 </div>
               </form>
@@ -518,60 +566,24 @@ END:VCALENDAR`;
         <motion.div 
           initial={{ opacity: 0, scale: 0.98 }} 
           animate={{ opacity: 1, scale: 1 }} 
-          className="bg-gradient-to-r from-red-950/40 via-[#111113] to-red-950/40 border border-red-500/30 p-6 rounded-2xl space-y-4 shadow-[0_0_30px_rgba(239,68,68,0.08)]"
+          className="bg-red-50 border border-red-200 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm"
         >
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 animate-pulse">
+            <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 shrink-0">
               <Flame className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-red-400 font-semibold tracking-tight text-base">Emergency Defense engaged</h3>
-              <p className="text-xs text-slate-300">Strict triage mode. AI recommends prioritizing tasks by hard deadlines immediately.</p>
+              <h3 className="text-red-700 font-semibold tracking-tight text-sm">Emergency Protocol Active</h3>
+              <p className="text-xs text-red-600/80 mt-0.5">Focus exclusively on tasks with imminent deadlines. Ignore non-essentials.</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setEmergencyMode(false)} className="text-xs text-slate-500 hover:text-white ml-auto font-mono">
-              Dismiss Mode
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-slate-950/50 p-4 rounded-xl border border-red-500/10 space-y-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-red-400">Tactics 01</span>
-              <h4 className="text-sm font-semibold text-slate-200">Postpone Non-Essentials</h4>
-              <p className="text-xs text-slate-400">Ignore tasks without a deadline today. Postpone any low score priorities.</p>
-            </div>
-            <div className="bg-slate-950/50 p-4 rounded-xl border border-red-500/10 space-y-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-red-400">Tactics 02</span>
-              <h4 className="text-sm font-semibold text-slate-200">Engage Pomodoro Loops</h4>
-              <p className="text-xs text-slate-400">Select your Primary Focus Task below and do not switch until completed.</p>
-            </div>
-            <div className="bg-slate-950/50 p-4 rounded-xl border border-red-500/10 space-y-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-red-400">Tactics 03</span>
-              <h4 className="text-sm font-semibold text-slate-200">Decompose First</h4>
-              <p className="text-xs text-slate-400">If a complex task paralyzes you, AI autonomously breaks it down into immediate steps.</p>
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-      {/* Auto Emergency Mode Suggestion banner */}
-      {!emergencyMode && hasImminentDeadline && (
-        <motion.div 
-          initial={{ opacity: 0 }} 
-          animate={{ opacity: 1 }} 
-          className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4"
-        >
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
-            <p className="text-xs text-slate-300">
-              <strong className="text-amber-400">Urgent deadline approaching!</strong> You have pending tasks expiring in less than 12 hours. AI recommends enabling Emergency Mode.
-            </p>
           </div>
           <Button 
-            onClick={() => setEmergencyMode(true)}
+            variant="outline" 
             size="sm" 
-            className="bg-amber-600 hover:bg-amber-500 text-white font-mono text-xs rounded-full shrink-0"
+            onClick={() => setEmergencyMode(false)} 
+            className="text-xs text-red-700 hover:text-red-800 border-red-200 hover:bg-red-100 shrink-0"
           >
-            Activate Emergency Mode
+            Dismiss Protocol
           </Button>
         </motion.div>
       )}
@@ -581,100 +593,271 @@ END:VCALENDAR`;
         <motion.div 
           initial={{ opacity: 0, y: -10 }} 
           animate={{ opacity: 1, y: 0 }} 
-          className="bg-[#15151a] border border-amber-500/30 rounded-2xl p-6 space-y-4 shadow-[0_0_20px_rgba(245,158,11,0.05)]"
+          className="bg-white border border-slate-200/60 rounded-3xl p-8 space-y-8 shadow-[0_4px_40px_-10px_rgba(0,0,0,0.05)]"
         >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <span className="text-[10px] uppercase tracking-widest font-mono text-amber-500 flex items-center gap-1">
-                <Star className="h-3 w-3 fill-amber-500" /> Primary Focus Task
+          <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+            <div className="space-y-2 max-w-3xl">
+              <span className="text-xs uppercase tracking-[0.2em] font-semibold text-slate-400 flex items-center gap-1.5 mb-2">
+                <Star className="h-4 w-4 text-amber-500 fill-amber-500" /> Current Focus
               </span>
-              <h2 className="text-xl font-semibold text-slate-100">{focusTask.title}</h2>
-              <p className="text-xs text-slate-400 max-w-2xl">{focusTask.description || "No description provided."}</p>
+              <h2 className="text-3xl font-bold tracking-tight text-slate-900 leading-tight">{focusTask.title}</h2>
+              <p className="text-base text-slate-500 leading-relaxed">{focusTask.description || "No description provided."}</p>
             </div>
             
             {/* Real-time deadline countdown */}
             {focusTask.deadline && (
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <span className="text-[10px] uppercase font-mono tracking-widest text-slate-500">Timer to Deadline</span>
-                <DeadlineTimer deadlineStr={focusTask.deadline} />
+              <div className="flex flex-col md:items-end gap-1.5 shrink-0">
+                <span className="text-[11px] uppercase tracking-[0.2em] font-semibold text-slate-400">Time Remaining</span>
+                <DeadlineTimer deadlineStr={focusTask.deadline} onEmergency={() => setEmergencyMode(true)} />
               </div>
             )}
           </div>
 
-          {/* Perceive: Dynamic AI Nudge Block */}
-          {focusTask && (
-            <motion.div 
-              initial={{ opacity: 0, y: 5 }} 
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 flex gap-3 items-start"
-            >
-              <div className="h-8 w-8 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500 shrink-0 mt-0.5">
-                <Brain className="h-4 w-4" />
+          {/* Act: Autonomous Task Automations (Moved Up & Eye-Catching) */}
+          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <span className="text-[11px] uppercase tracking-[0.2em] font-semibold text-blue-600 flex items-center gap-1.5">
+                  <Zap className="h-4 w-4 fill-blue-600" /> Action Center
+                </span>
+                <h4 className="text-base font-semibold text-slate-900">Task Automations</h4>
+                <p className="text-sm text-slate-500">Intelligent actions to accelerate your progress.</p>
               </div>
-              <div className="space-y-1 w-full">
-                <span className="text-[10px] uppercase font-mono tracking-widest text-emerald-500 font-semibold block">NEXUS Perceive Engine</span>
-                {activeNudge && <p className="text-xs text-slate-300 leading-normal mb-2">{activeNudge.message}</p>}
-                
-                <div className="flex flex-col gap-1 text-[11px] text-emerald-400 font-mono bg-emerald-950/20 p-2.5 rounded border border-emerald-500/10">
-                  <span className="font-bold uppercase text-[9px] tracking-wide text-emerald-500">Ongoing Subtask:</span>
-                  {focusTask.subtasks && focusTask.subtasks.filter(s => !s.completed).length > 0 ? (
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      <span className="text-slate-200 font-sans text-xs">
-                        {focusTask.subtasks.find(s => !s.completed)?.title}
-                      </span>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        ({focusTask.subtasks.find(s => !s.completed)?.estimatedMinutes}m)
-                      </span>
+            </div>
+
+            {(() => {
+              const hoursLeft = (new Date(focusTask.deadline).getTime() - Date.now()) / (1000 * 60 * 60);
+              const hyperUrgent = hoursLeft > 0 && hoursLeft <= 1;
+              
+              if (hyperUrgent || emergencyMode) {
+                if (helperState === 'idle') {
+                  
+                  return (
+                    <div className="space-y-4">
+                      <div className="bg-amber-50 border border-amber-200/60 p-4 rounded-xl flex gap-4 items-start">
+                        <Sparkles className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <p className="text-sm text-slate-800 leading-relaxed">
+                            <strong>Time is critical.</strong> Would you like me to take over some of this work for you?
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {isFetchingActions ? (
+                          <div className="col-span-full py-4 flex justify-center">
+                             <RotateCw className="h-5 w-5 animate-spin text-amber-500" />
+                          </div>
+                        ) : dynamicActionsList.map((action) => (
+                          <Button 
+                            key={action.id}
+                            variant="outline" 
+                            onClick={() => { setHelperSelectedAction(action); setHelperState('asking'); }}
+                            className="bg-white border-amber-200 text-amber-800 hover:text-amber-900 hover:bg-amber-50 text-sm font-medium h-12 transition-all shadow-sm"
+                          >
+                            <Zap className="h-4 w-4 mr-2" />
+                            {action.label}
+                          </Button>
+                        ))}
+                      </div>
                     </div>
-                  ) : (
-                    <span className="text-slate-400 font-sans text-xs italic">
-                      {focusTask.subtasks && focusTask.subtasks.length > 0 
-                        ? "All subtasks completed! Complete the main task below." 
-                        : "No subtasks generated yet. Please trigger AI Task Decomposition."}
-                    </span>
-                  )}
+                  );
+                }
+
+                if (helperState === 'asking' && helperSelectedAction) {
+                  return (
+                    <div className="space-y-4 p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
+                      <p className="text-base font-medium text-slate-800">
+                        Do I have your permission to {helperSelectedAction.actionText}?
+                      </p>
+                      <div className="flex gap-3">
+                        <Button onClick={() => {
+                          if (helperSelectedAction.needsCreds) {
+                            setHelperState('need_creds');
+                          } else {
+                            handleRunAction(helperSelectedAction.id, helperSelectedAction.outputMock);
+                            setHelperState('done');
+                          }
+                        }} className="bg-blue-600 hover:bg-blue-700 text-white text-sm h-10 px-6 font-medium shadow-sm">
+                          Yes, please proceed
+                        </Button>
+                        <Button onClick={() => setHelperState('idle')} variant="outline" className="text-sm h-10 px-6 text-slate-600">Cancel</Button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (helperState === 'need_creds' && helperSelectedAction) {
+                  return (
+                    <div className="space-y-4 p-5 bg-red-50/50 border border-red-100 rounded-xl">
+                      <div className="space-y-1">
+                        <p className="text-base font-semibold text-red-900">Authentication Required</p>
+                        <p className="text-sm text-red-700">Please provide your API token or credentials to securely execute this action.</p>
+                      </div>
+                      <input 
+                        type="text" 
+                        placeholder="Enter API Token" 
+                        value={helperToken}
+                        onChange={(e) => setHelperToken(e.target.value)}
+                        className="bg-white border-red-200 focus:outline-none focus:ring-1 focus:ring-red-500 w-full text-sm h-10 px-3 rounded-md border" 
+                      />
+                      <div className="flex gap-3 pt-1">
+                        <Button onClick={() => {
+                          if (helperToken) {
+                            handleRunAction(helperSelectedAction.id, helperSelectedAction.outputMock);
+                            setHelperState('done');
+                          } else {
+                            toast.error("Please enter a valid token.");
+                          }
+                        }} className="bg-red-600 hover:bg-red-700 text-white text-sm h-10 px-6 shadow-sm">
+                          Save & Proceed
+                        </Button>
+                        <Button onClick={() => setHelperState('idle')} variant="outline" className="text-sm h-10 px-6 text-red-700 border-red-200 hover:bg-red-50">Cancel</Button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (helperState === 'done' && helperSelectedAction) {
+                  return (
+                    <div className="space-y-4 p-5 bg-emerald-50/50 border border-emerald-100 rounded-xl">
+                      <p className="text-base font-medium text-emerald-900 flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                        {helperSelectedAction.completionText}
+                      </p>
+                      <Button onClick={() => { setHelperState('idle'); setHelperSelectedAction(null); setHelperToken(""); }} variant="outline" className="text-sm h-10 px-6 border-emerald-200 text-emerald-800 hover:bg-emerald-100 shadow-sm">Done</Button>
+                    </div>
+                  );
+                }
+              }
+              
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => handleRunAction('email')}
+                    disabled={isExecutingAction}
+                    className="bg-white border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 text-sm font-medium h-12 shadow-sm"
+                  >
+                    <Mail className="h-4 w-4 text-blue-500 mr-2" />
+                    Draft Progress Email
+                  </Button>
+
+                  <Button 
+                    variant="outline" 
+                    onClick={() => handleRunAction('calendar')}
+                    disabled={isExecutingAction}
+                    className="bg-white border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 text-sm font-medium h-12 shadow-sm"
+                  >
+                    <Calendar className="h-4 w-4 text-amber-500 mr-2" />
+                    Sync Calendar Event
+                  </Button>
                 </div>
+              );
+            })()}
+
+            {isExecutingAction && (
+              <div className="flex items-center gap-2 py-2 text-sm text-slate-500 font-mono animate-pulse">
+                <RotateCw className="h-4 w-4 animate-spin" /> Preparing AI action payload...
               </div>
-            </motion.div>
-          )}
+            )}
+
+            {activeActionType && actionOutput && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }} 
+                animate={{ opacity: 1, height: 'auto' }}
+                className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-sm mt-4"
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <span className="text-[11px] uppercase font-mono tracking-wider text-slate-500 font-semibold">
+                    Drafted {activeActionType === 'email' ? 'Email Payload' : activeActionType === 'calendar' ? 'Calendar Event' : activeActionType === 'essay_outline' ? 'Essay Outline' : activeActionType === 'draft_final' ? 'Final Draft' : activeActionType === 'export_deliverable' ? 'Deliverable' : 'Task Manifest'}
+                  </span>
+                  <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200 text-[10px] font-mono tracking-wide py-0.5 px-2">
+                    Ready
+                  </Badge>
+                </div>
+                <pre className="text-sm text-slate-700 font-mono whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto bg-slate-50 p-4 rounded-lg border border-slate-200">
+                  {actionOutput}
+                </pre>
+                
+                <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+                  {activeActionType === 'email' && (
+                    <Button 
+                      onClick={triggerMailto}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-sm h-10 px-5 shadow-sm font-medium"
+                    >
+                      <Mail className="h-4 w-4 mr-2" />
+                      Dispatch Draft to Email
+                    </Button>
+                  )}
+                  {activeActionType === 'calendar' && (
+                    <Button 
+                      onClick={triggerGoogleCalendar}
+                      className="bg-amber-500 hover:bg-amber-600 text-white text-sm h-10 px-5 shadow-sm font-medium"
+                    >
+                      <Calendar className="h-4 w-4 mr-2" />
+                      Save to Google Cal
+                    </Button>
+                  )}
+                  {activeActionType && ['essay_outline', 'draft_final', 'export_deliverable'].includes(activeActionType) && (
+                    <Button 
+                      onClick={() => toast.success('Saved to local device.')}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm h-10 px-5 shadow-sm font-medium"
+                    >
+                      <Zap className="h-4 w-4 mr-2" />
+                      Download File
+                    </Button>
+                  )}
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => { setActiveActionType(null); setActionOutput(""); }}
+                    className="text-sm text-slate-500 hover:text-slate-700 h-10 px-4"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </div>
 
           {/* Subtask Quick Completion & Decomposition Box */}
-          <div className="bg-slate-950/40 p-5 rounded-xl border border-slate-800/80 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
-              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Network className="h-3.5 w-3.5 text-pink-400" /> Task Decomposition & Subtasks
-              </span>
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Network className="h-4 w-4 text-indigo-500" /> Action Steps
+                </span>
+                <p className="text-sm text-slate-500">Break down your task into manageable subtasks.</p>
+              </div>
               {focusTask.priorityScore !== undefined && (
-                <Badge variant="outline" className={getPriorityColor(focusTask.priorityScore)}>
+                <Badge variant="outline" className={`px-3 py-1 bg-slate-50 ${getPriorityColor(focusTask.priorityScore)}`}>
                   Priority {(focusTask.priorityScore).toFixed(1)}
                 </Badge>
               )}
             </div>
 
             {focusTask.subtasks && focusTask.subtasks.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {(() => {
                   const activeSubtasks = focusTask.subtasks || [];
                   const totalSubtasks = activeSubtasks.length;
                   const completedSubtasks = activeSubtasks.filter(s => s.completed).length;
                   const subPercentage = totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0;
-                  const radius = 32;
+                  const radius = 36;
                   const circumference = 2 * Math.PI * radius;
                   const offset = circumference - (subPercentage / 100) * circumference;
 
                   return (
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
                       {/* Circular Progress Bar Component */}
-                      <div className="md:col-span-4 flex flex-col items-center justify-center bg-slate-900/40 p-4 rounded-xl border border-slate-800/60 shadow-[0_4px_12px_rgba(0,0,0,0.1)]">
-                        <div className="relative h-24 w-24 flex items-center justify-center">
+                      <div className="md:col-span-4 flex flex-col items-center justify-center p-6 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                        <div className="relative h-28 w-28 flex items-center justify-center">
                           <svg className="absolute -rotate-90 w-full h-full" viewBox="0 0 80 80">
                             <circle
                               cx="40"
                               cy="40"
                               r={radius}
-                              className="text-slate-800/80"
-                              strokeWidth="5"
+                              className="text-slate-200"
+                              strokeWidth="6"
                               stroke="currentColor"
                               fill="transparent"
                             />
@@ -682,8 +865,8 @@ END:VCALENDAR`;
                               cx="40"
                               cy="40"
                               r={radius}
-                              className="text-pink-500"
-                              strokeWidth="5"
+                              className="text-indigo-600"
+                              strokeWidth="6"
                               strokeDasharray={circumference}
                               initial={{ strokeDashoffset: circumference }}
                               animate={{ strokeDashoffset: offset }}
@@ -694,273 +877,99 @@ END:VCALENDAR`;
                             />
                           </svg>
                           <div className="flex flex-col items-center justify-center text-center">
-                            <span className="text-lg font-bold text-slate-100 tracking-tight">
+                            <span className="text-xl font-bold text-slate-900 tracking-tight">
                               {Math.round(subPercentage)}%
-                            </span>
-                            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500 mt-0.5">
-                              Done
                             </span>
                           </div>
                         </div>
-                        <div className="text-center mt-2.5">
-                          <span className="text-xs font-mono text-slate-400">
-                            {completedSubtasks} / {totalSubtasks} Subtasks
+                        <div className="text-center mt-4">
+                          <span className="text-sm font-medium text-slate-600">
+                            {completedSubtasks} of {totalSubtasks} steps
                           </span>
                         </div>
                       </div>
 
                       {/* Subtask checklist */}
-                      <div className="md:col-span-8 space-y-3">
-                        <div className="grid gap-2.5">
-                          {focusTask.subtasks.map((sub, i) => (
-                            <div key={i} className="flex items-center gap-3 text-sm py-1 border-b border-slate-900/40 last:border-0">
-                              <button 
-                                onClick={() => {
-                                  const newSubs = [...(focusTask.subtasks || [])];
-                                  newSubs[i].completed = !newSubs[i].completed;
-                                  updateTask(focusTask.id, { subtasks: newSubs });
-                                  toast.success(`Updated subtask "${sub.title}" status.`);
-                                }}
-                                className="text-slate-500 hover:text-emerald-400 transition-colors shrink-0"
-                              >
-                                {sub.completed ? <CheckCircle2 className="h-4.5 w-4.5 text-[#15803D]" /> : <Circle className="h-4.5 w-4.5 text-slate-600" />}
-                              </button>
-                              <span className={`flex-1 transition-all ${sub.completed ? 'text-slate-500 line-through decoration-slate-600' : 'text-slate-200'}`}>
-                                {sub.title}
-                              </span>
-                              <span className="text-xs font-mono text-slate-500 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800/60">{sub.estimatedMinutes}m</span>
-                            </div>
-                          ))}
-                        </div>
+                      <div className="md:col-span-8 space-y-3 pt-2">
+                        {focusTask.subtasks.map((sub, i) => (
+                          <div key={i} className="flex items-center gap-4 py-2 group">
+                            <button 
+                              onClick={() => {
+                                const newSubs = [...(focusTask.subtasks || [])];
+                                newSubs[i].completed = !newSubs[i].completed;
+                                updateTask(focusTask.id, { subtasks: newSubs });
+                                toast.success(`Updated step "${sub.title}".`);
+                              }}
+                              className="text-slate-300 hover:text-indigo-600 transition-colors shrink-0"
+                            >
+                              {sub.completed ? <CheckCircle2 className="h-6 w-6 text-indigo-600" /> : <Circle className="h-6 w-6 text-slate-300 hover:text-slate-400" />}
+                            </button>
+                            <span className={`flex-1 text-base transition-all ${sub.completed ? 'text-slate-400 line-through decoration-slate-300' : 'text-slate-700'}`}>
+                              {sub.title}
+                            </span>
+                            <span className="text-xs font-mono text-slate-500 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">{sub.estimatedMinutes}m</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );
                 })()}
-
-                {focusTask.agentLogs && (
-                  <div className="pt-3 border-t border-slate-800/60 mt-3">
-                    <button
-                      onClick={() => setExpandedAgentLogs(prev => ({ ...prev, [focusTask.id]: !prev[focusTask.id] }))}
-                      className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 font-medium font-mono transition-colors"
-                    >
-                      <Bot className="h-3.5 w-3.5" />
-                      {expandedAgentLogs[focusTask.id] ? 'Hide Agent Collaboration Logs' : 'View Agent Collaboration Logs'}
-                    </button>
-                    {expandedAgentLogs[focusTask.id] && (
-                      <div className="mt-3 space-y-3 bg-slate-950 border border-slate-850 rounded-lg p-4 text-xs max-h-72 overflow-y-auto">
-                        <div className="flex items-center gap-1.5 border-b border-slate-800 pb-1.5 text-[10px] uppercase font-mono tracking-wider text-slate-400">
-                          <Network className="h-3 w-3 text-cyan-400 animate-pulse" />
-                          <span>Multi-Agent Collaboration Board</span>
-                        </div>
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <div className="font-mono text-[10px] text-cyan-400 font-semibold uppercase">
-                              👁️ Perceiving agent
-                            </div>
-                            <p className="text-slate-300 leading-relaxed pl-3 border-l border-cyan-500/20">{focusTask.agentLogs.perceivingAgentLog}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <div className="font-mono text-[10px] text-indigo-400 font-semibold uppercase">
-                              ⚖️ Prioritizing agent
-                            </div>
-                            <p className="text-slate-300 leading-relaxed pl-3 border-l border-indigo-500/20">{focusTask.agentLogs.prioritizingAgentLog}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <div className="font-mono text-[10px] text-pink-400 font-semibold uppercase">
-                              🧩 Decomposing Agent
-                            </div>
-                            <p className="text-slate-300 leading-relaxed pl-3 border-l border-pink-500/20">{focusTask.agentLogs.decomposingAgentLog}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <div className="font-mono text-[10px] text-amber-400 font-semibold uppercase">
-                              🗺️ Planning agent
-                            </div>
-                            <p className="text-slate-300 leading-relaxed pl-3 border-l border-amber-500/20">{focusTask.agentLogs.planningAgentLog}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <div className="font-mono text-[10px] text-emerald-400 font-semibold uppercase">
-                              🤖 Autonomous task automation agent
-                            </div>
-                            <p className="text-slate-300 leading-relaxed pl-3 border-l border-emerald-500/20">{focusTask.agentLogs.autonomousAutomationLog}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <div className="font-mono text-[10px] text-purple-400 font-semibold uppercase">
-                              👑 Orchestrating agent
-                            </div>
-                            <p className="text-slate-300 leading-relaxed pl-3 border-l border-purple-500/20">{focusTask.agentLogs.orchestratingAgentLog}</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-6 text-center space-y-3 bg-slate-900/30 rounded-xl border border-dashed border-slate-800">
-                <Sparkles className="h-5 w-5 text-pink-500 animate-pulse" />
-                <div className="space-y-1">
-                  <p className="text-xs text-slate-300 font-medium">No steps generated yet</p>
-                  <p className="text-[11px] text-slate-500 max-w-xs leading-normal">
-                    Use the NEXUS Multi-Agent Orchestrator to analyze and decompose this task.
+              <div className="flex flex-col items-center justify-center py-12 text-center space-y-4 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                <div className="h-12 w-12 rounded-full bg-indigo-50 flex items-center justify-center">
+                  <Sparkles className="h-6 w-6 text-indigo-500" />
+                </div>
+                <div className="space-y-1.5 max-w-sm">
+                  <p className="text-sm text-slate-900 font-medium">Break it down with AI</p>
+                  <p className="text-sm text-slate-500 leading-relaxed">
+                    Generate actionable steps automatically to reduce overwhelm and start executing.
                   </p>
                 </div>
                 <Button 
-                  size="sm" 
                   onClick={() => handleDecompose(focusTask)}
-                  className="bg-pink-600 hover:bg-pink-500 text-white text-xs font-mono rounded-full px-4 h-8"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm h-10 px-6 rounded-full shadow-sm mt-2 font-medium"
                 >
-                  <Bot className="h-3.5 w-3.5 mr-1.5" />
-                  Decompose Task Now
+                  <Bot className="h-4 w-4 mr-2" />
+                  Decompose Task
                 </Button>
               </div>
             )}
           </div>
 
-          {/* Act: Autonomous Task Automations */}
-          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-850 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <span className="text-[10px] uppercase font-mono tracking-widest text-blue-400 font-semibold flex items-center gap-1">
-                  <Zap className="h-3.5 w-3.5 fill-blue-400" /> NEXUS Action Chamber
-                </span>
-                <h4 className="text-xs font-semibold text-slate-200">Autonomous Task Automations</h4>
-                <p className="text-[11px] text-slate-400">Execute real-world communications and calendar bookings based on this task.</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => handleRunAction('email')}
-                disabled={isExecutingAction}
-                className="bg-slate-900 border-slate-850 text-slate-300 hover:text-white hover:bg-slate-800 text-[11px] flex items-center justify-center gap-1.5 h-8"
-              >
-                <Mail className="h-3 w-3 text-blue-400" />
-                Draft Progress Email
-              </Button>
-
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => handleRunAction('calendar')}
-                disabled={isExecutingAction}
-                className="bg-slate-900 border-slate-850 text-slate-300 hover:text-white hover:bg-slate-800 text-[11px] flex items-center justify-center gap-1.5 h-8"
-              >
-                <Calendar className="h-3 w-3 text-amber-400" />
-                Sync Calendar event
-              </Button>
-
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => handleRunAction('local')}
-                disabled={isExecutingAction}
-                className="bg-slate-900 border-slate-850 text-slate-300 hover:text-white hover:bg-slate-800 text-[11px] flex items-center justify-center gap-1.5 h-8"
-              >
-                <SlidersHorizontal className="h-3 w-3 text-emerald-400" />
-                Generate ICS block
-              </Button>
-            </div>
-
-            {isExecutingAction && (
-              <div className="flex items-center gap-2 py-1 text-[11px] text-slate-500 font-mono animate-pulse">
-                <RotateCw className="h-3 w-3 animate-spin" /> Preparing AI action payload...
-              </div>
-            )}
-
-            {activeActionType && actionOutput && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }} 
-                animate={{ opacity: 1, height: 'auto' }}
-                className="bg-slate-950 border border-slate-850 rounded-lg p-3.5 space-y-2.5 mt-2"
-              >
-                <div className="flex items-center justify-between border-b border-slate-900 pb-1.5">
-                  <span className="text-[9px] uppercase font-mono tracking-wider text-slate-400">
-                    Drafted {activeActionType === 'email' ? 'Email Payload' : activeActionType === 'calendar' ? 'Calendar Event' : 'Task Manifest'}
-                  </span>
-                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[8px] font-mono font-normal py-0 px-1">
-                    Ready
-                  </Badge>
-                </div>
-                <pre className="text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed max-h-36 overflow-y-auto bg-slate-900/30 p-2 rounded border border-slate-950">
-                  {actionOutput}
-                </pre>
-                
-                <div className="flex items-center justify-end gap-2 pt-1">
-                  {activeActionType === 'email' && (
-                    <Button 
-                      size="sm"
-                      onClick={triggerMailto}
-                      className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] h-7 rounded-full font-mono font-medium"
-                    >
-                      <Mail className="h-3 w-3 mr-1" />
-                      Dispatch Draft to Email
-                    </Button>
-                  )}
-                  {activeActionType === 'calendar' && (
-                    <Button 
-                      size="sm"
-                      onClick={triggerGoogleCalendar}
-                      className="bg-amber-600 hover:bg-amber-500 text-white text-[11px] h-7 rounded-full font-mono font-medium"
-                    >
-                      <Calendar className="h-3 w-3 mr-1" />
-                      Save to Google Cal
-                    </Button>
-                  )}
-                  {activeActionType === 'local' && (
-                    <Button 
-                      size="sm"
-                      onClick={triggerICSDownload}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] h-7 rounded-full font-mono font-medium"
-                    >
-                      <Zap className="h-3 w-3 mr-1" />
-                      Download ICS File
-                    </Button>
-                  )}
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => { setActiveActionType(null); setActionOutput(""); }}
-                    className="text-[10px] text-slate-500 hover:text-slate-300 font-mono h-7"
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </motion.div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 pt-2">
+          <div className="flex justify-end pt-4">
             <Button 
-              size="sm" 
               onClick={() => {
                 updateTask(focusTask.id, { status: 'completed' });
                 setPrimaryFocusTaskId(null);
                 toast.success("Hooray! Focus task completed successfully.");
               }}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs rounded-full"
+              className="bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm h-12 px-8 rounded-full shadow-md transition-transform hover:scale-105"
             >
-              <Check className="h-4 w-4 mr-1.5" />
+              <Check className="h-5 w-5 mr-2" />
               Complete Task
             </Button>
           </div>
         </motion.div>
       ) : (
-        <Card className="bg-slate-950/20 border border-dashed border-slate-800 p-6 rounded-2xl flex flex-col items-center justify-center text-center space-y-3">
-          <Star className="h-6 w-6 text-slate-600" />
-          <div>
-            <h3 className="text-sm font-semibold text-slate-300">No primary focus</h3>
-            <p className="text-xs text-slate-500 max-w-sm mt-0.5 mb-3">No active task is currently in focus mode.</p>
+        <div className="bg-white border border-slate-200/60 p-12 rounded-3xl flex flex-col items-center justify-center text-center space-y-6 shadow-sm">
+          <div className="h-16 w-16 rounded-full bg-slate-50 flex items-center justify-center border border-slate-100">
+            <Star className="h-8 w-8 text-amber-500 fill-amber-500/20" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-bold text-slate-900 tracking-tight">No Primary Focus</h3>
+            <p className="text-base text-slate-500 max-w-md mx-auto leading-relaxed">
+              Select a task to enter Deep Focus mode and block out all distractions.
+            </p>
           </div>
           <Button 
             onClick={handleReEnterFocusMode}
-            className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-mono rounded-full px-5 h-8 flex items-center gap-1.5"
+            className="bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm h-12 px-8 rounded-full shadow-md transition-transform hover:scale-105 mt-4"
           >
-            <Star className="h-3.5 w-3.5 fill-white" />
-            Re-enter Focus Mode
+            <Star className="h-4 w-4 mr-2" />
+            Select a Task to Focus
           </Button>
-        </Card>
+        </div>
       )}
 
       <VoiceOrb />

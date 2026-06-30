@@ -11,7 +11,9 @@ export const googleProvider = new GoogleAuthProvider();
 
 // Add Workspace scopes
 googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');
-googleProvider.addScope('https://www.googleapis.com/auth/gmail.compose');
+googleProvider.addScope('https://www.googleapis.com/auth/gmail.send');
+googleProvider.addScope('https://www.googleapis.com/auth/documents');
+googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
 
 // Flag to indicate if we are in the middle of a sign-in flow.
 let isSigningIn = false;
