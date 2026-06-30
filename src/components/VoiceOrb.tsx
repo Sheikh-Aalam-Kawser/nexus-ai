@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 export function VoiceOrb() {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [pendingTask, setPendingTask] = useState<{ title: string, priorityScore?: number } | null>(null);
+  const [history, setHistory] = useState<{role: 'user' | 'assistant', text: string}[]>([]);
   const recognitionRef = useRef<any>(null);
   const { addTask } = useAppStore();
 
@@ -42,13 +42,16 @@ export function VoiceOrb() {
       setIsProcessing(true);
       toast.loading(`Processing: "${transcript}"`, { id: 'voice-toast' });
       
+      const currentHistory = [...history, { role: 'user' as const, text: transcript }];
+      setHistory(currentHistory);
+      
       try {
         const response = await fetch('/api/agents/voice', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ transcript, pendingTaskContext: pendingTask }),
+          body: JSON.stringify({ transcript, history }),
         });
         
         if (!response.ok) { const errData = await response.json().catch(() => ({})); throw new Error(errData.error || 'Failed to parse voice command'); }
@@ -62,58 +65,26 @@ export function VoiceOrb() {
           }
         };
 
-        if (pendingTask) {
-          if (data.needsClarification) {
-            toast.success(data.conversationalResponse || "Please specify a deadline.", { id: 'voice-toast' });
-            speak(data.conversationalResponse || "Please specify a deadline.");
-          } else {
-            addTask({
-              id: crypto.randomUUID(),
-              userId: 'user', // would be actual uid
-              title: pendingTask.title,
-              description: `Generated from voice.`,
-              deadline: data.deadline || new Date(Date.now() + 86400000).toISOString(),
-              status: 'pending',
-              priorityScore: pendingTask.priorityScore || 5,
-              subtasks: [],
-              focusBlocks: [],
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            });
-            toast.success(`Task added: ${pendingTask.title}`, { id: 'voice-toast' });
-            speak(`Added task: ${pendingTask.title}`);
-            setPendingTask(null);
-          }
-        } else {
-          if (data.isTask === false) {
-            toast.success(data.conversationalResponse || "Hello!", { id: 'voice-toast' });
-            speak(data.conversationalResponse || "Hello!");
-          } else if (data.isTask) {
-            if (data.needsDeadline) {
-              setPendingTask({ title: data.title, priorityScore: data.priorityScore });
-              const msg = `When is the deadline for ${data.title}?`;
-              toast.success(msg, { id: 'voice-toast' });
-              speak(msg);
-            } else if (data.title) {
-              addTask({
-                id: crypto.randomUUID(),
-                userId: 'user', // would be actual uid
-                title: data.title,
-                description: `Generated from voice: "${transcript}"`,
-                deadline: data.deadline || new Date(Date.now() + 86400000).toISOString(),
-                status: 'pending',
-                priorityScore: data.priorityScore || 5,
-                subtasks: [],
-                focusBlocks: [],
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              });
-              toast.success(`Task added: ${data.title}`, { id: 'voice-toast' });
-              speak(`Added task: ${data.title}`);
-            }
-          } else {
-            throw new Error("No task parsed");
-          }
+        if (data.responseText) {
+          toast.success(data.responseText, { id: 'voice-toast' });
+          speak(data.responseText);
+          setHistory([...currentHistory, { role: 'assistant' as const, text: data.responseText }]);
+        }
+
+        if (data.createTask) {
+          addTask({
+            id: crypto.randomUUID(),
+            userId: 'user', // would be actual uid
+            title: data.createTask.title,
+            description: `Generated from voice interaction.`,
+            deadline: data.createTask.deadline || new Date(Date.now() + 86400000).toISOString(),
+            status: 'pending',
+            priorityScore: data.createTask.priorityScore || 5,
+            subtasks: [],
+            focusBlocks: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
         }
       } catch (err: any) {
         const errMsg = err.message || String(err);

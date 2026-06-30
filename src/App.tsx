@@ -9,6 +9,7 @@ import TaskPlanPage from './pages/TaskPlanPage';
 import NavBar from './components/NavBar';
 import { Toaster } from '@/components/ui/sonner';
 import { initAuth } from './lib/firebase';
+import { FocusPlanPopup } from './components/FocusPlanPopup';
 
 export default function App() {
   const { user, tasks, autoEvaluatePrioritiesAndFocus, setUser } = useAppStore();
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="/plan" element={user ? <TaskPlanPage /> : <Navigate to="/" />} />
         <Route path="/profile" element={user ? <Profile /> : <Navigate to="/" />} />
       </Routes>
+      <FocusPlanPopup />
       <Toaster theme="dark" />
     </div>
   );

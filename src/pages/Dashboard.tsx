@@ -472,7 +472,25 @@ END:VCALENDAR`;
               <DialogHeader>
                 <DialogTitle className="text-xl font-light" style={{ fontFamily: "'Georgia', serif" }}>Create New Task</DialogTitle>
               </DialogHeader>
-              <form onSubmit={handleAddTask} className="space-y-5 pt-4">
+              <form 
+                onSubmit={handleAddTask} 
+                className="space-y-5 pt-4"
+                onKeyDown={(e) => {
+                  // Platform check: In React, e.key === 'Enter' uniformly covers both the 'Enter' key on Windows and 'Return' on macOS.
+                  // We also ensure shiftKey is not pressed to allow newlines in textareas.
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    // Only activate if the user has entered task details (e.g. title is present)
+                    // and ensure it only fires when inside the form inputs.
+                    if (newTask.title.trim() !== '') {
+                      e.preventDefault(); // Do not disrupt other behaviors (like adding a newline)
+                      const submitBtn = e.currentTarget.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+                      if (submitBtn) {
+                        submitBtn.click(); // Trigger the Create Task button
+                      }
+                    }
+                  }
+                }}
+              >
                 <div className="space-y-2">
                   <Label htmlFor="title" className="text-[10px] uppercase tracking-widest text-slate-500">Task Title</Label>
                   <Input id="title" value={newTask.title} onChange={e => setNewTask({...newTask, title: e.target.value})} className="bg-slate-900 border-slate-800 focus-visible:ring-emerald-500 text-slate-100" placeholder="e.g. Complete quarterly report" />

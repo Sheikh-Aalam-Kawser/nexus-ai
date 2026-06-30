@@ -153,55 +153,45 @@ Existing Events: ${JSON.stringify(existingEvents || [])}`;
 // 3. Voice Parsing (NEXUS Voice Agent)
 // ---------------------------------------------------------------------------
 app.post("/api/agents/voice", async (req, res) => {
-  const { transcript, pendingTaskContext } = req.body;
+  const { transcript, history } = req.body;
   
   try {
     const aiInstance = getAIClient(req);
     
-    let contents = "";
-    let systemInstruction = "";
-    let responseSchema: any = {};
-    
-    if (pendingTaskContext) {
-      contents = `The user is providing a deadline for the pending task "${pendingTaskContext.title}". Parse this voice input as a deadline. If they didn't provide a valid deadline, set needsClarification to true.
-Input: "${transcript}"
-Current Time: ${new Date().toISOString()}`;
-      systemInstruction = "You extract deadline from natural language voice commands for a specific pending task. Output JSON.";
-      responseSchema = {
-        type: Type.OBJECT,
-        properties: {
-          deadline: { type: Type.STRING, description: "ISO 8601 date, if a valid deadline was provided" },
-          needsClarification: { type: Type.BOOLEAN, description: "True if the input is not a valid deadline" },
-          conversationalResponse: { type: Type.STRING, description: "Friendly reply if needs clarification" }
-        }
-      };
-    } else {
-      contents = `Parse this voice input. If it is an explicit command to create a task (e.g. "Create a task to...", "Remind me to..."), extract the details. If it is just a greeting or casual speech (e.g. "hello", "hi"), set isTask to false and provide a friendly conversationalResponse acknowledging the user.
-Important: Determine if a specific deadline or timeframe was mentioned. If no deadline/timeframe was mentioned (like "today", "tomorrow", "by 5pm", "next week"), set needsDeadline to true.
-Input: "${transcript}"
-Current Time: ${new Date().toISOString()}`;
-      systemInstruction = "You determine if voice input is a task command or conversational. If a task, extract title, deadline, priority. If no explicit timeframe/deadline is spoken for a task, flag needsDeadline as true. Output JSON.";
-      responseSchema = {
-        type: Type.OBJECT,
-        properties: {
-          isTask: { type: Type.BOOLEAN, description: "True if user is creating a task, false if casual greeting/speech" },
-          needsDeadline: { type: Type.BOOLEAN, description: "True if the user is creating a task but DID NOT mention any specific deadline or timeframe in the input" },
-          title: { type: Type.STRING, description: "Extracted task name, if isTask is true" },
-          deadline: { type: Type.STRING, description: "ISO 8601 date, inferred ONLY if timeframe was mentioned" },
-          priorityScore: { type: Type.NUMBER },
-          conversationalResponse: { type: Type.STRING, description: "Friendly reply if isTask is false or if you need to ask for deadline" }
-        },
-        required: ["isTask"]
-      };
-    }
+    // Format history for Gemini
+    const contents: any[] = (history || []).map((msg: any) => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.text }]
+    }));
+
+    contents.push({
+      role: "user",
+      parts: [{ text: `Current Time: ${new Date().toISOString()}\nUser input: "${transcript}"` }]
+    });
 
     const response = await aiInstance.models.generateContent({
       model: "gemini-2.5-flash",
       contents,
       config: {
-        systemInstruction,
+        systemInstruction: "You are the NEXUS AI voice assistant. Converse naturally with the user. If the user asks to create, add, or remind them of a task, include the 'createTask' object. If they don't specify a time, you can ask them for a deadline in your responseText, or just create it without a deadline. Always provide a conversational 'responseText' that will be spoken back to the user.",
         responseMimeType: "application/json",
-        responseSchema
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            responseText: { type: Type.STRING, description: "The spoken response to the user" },
+            createTask: {
+              type: Type.OBJECT,
+              description: "Include this ONLY if a task should be created based on the user's input",
+              properties: {
+                title: { type: Type.STRING },
+                deadline: { type: Type.STRING, description: "ISO 8601 date, if a timeframe was mentioned" },
+                priorityScore: { type: Type.NUMBER }
+              },
+              required: ["title"]
+            }
+          },
+          required: ["responseText"]
+        }
       }
     });
     res.json(JSON.parse(response.text || '{}'));
@@ -410,7 +400,7 @@ Current Time: ${new Date().toISOString()}`,
                   taskTitle: { type: Type.STRING },
                   subtaskId: { type: Type.STRING, description: "Optional subtask ID if mapping to a subtask" },
                   subtaskTitle: { type: Type.STRING, description: "Optional subtask title" },
-                  timeSlot: { type: Type.STRING, description: "Formatted time range, e.g. '09:00 - 10:30' or '14:00 - 15:15'" },
+                  timeSlot: { type: Type.STRING, description: "Formatted time range in 12-hour format with am/pm, e.g. '9:00 am - 10:30 am' or '2:00 pm - 3:15 pm'" },
                   durationMinutes: { type: Type.NUMBER, description: "Minutes allotted for this session" },
                   date: { type: Type.STRING, description: "Target date in format YYYY-MM-DD or relative day" },
                   description: { type: Type.STRING, description: "Specific actionable objective of this focus block" },

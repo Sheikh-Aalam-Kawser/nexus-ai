@@ -226,7 +226,25 @@ export default function MyTasks() {
               <DialogHeader>
                 <DialogTitle className="text-xl font-light" style={{ fontFamily: "'Georgia', serif" }}>Create Task Instance</DialogTitle>
               </DialogHeader>
-              <form onSubmit={handleCreateTask} className="space-y-4 pt-4">
+              <form 
+                onSubmit={handleCreateTask} 
+                className="space-y-4 pt-4"
+                onKeyDown={(e) => {
+                  // Platform check: In React, e.key === 'Enter' uniformly covers both the 'Enter' key on Windows and 'Return' on macOS.
+                  // We also ensure shiftKey is not pressed to allow newlines in textareas.
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    // Only activate if the user has entered task details (e.g. title is present)
+                    // and ensure it only fires when inside the form inputs.
+                    if (newTask.title.trim() !== '') {
+                      e.preventDefault(); // Do not disrupt other behaviors (like adding a newline)
+                      const submitBtn = e.currentTarget.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+                      if (submitBtn) {
+                        submitBtn.click(); // Trigger the Create Task button
+                      }
+                    }
+                  }
+                }}
+              >
                 <div className="space-y-1.5">
                   <Label htmlFor="title" className="text-[10px] uppercase tracking-widest text-slate-500 font-mono">Title</Label>
                   <Input 

@@ -44,6 +44,68 @@ export default function TaskPlanPage() {
     }
   }, [approvedPlan?.executionLogs]);
 
+  // Keep track of prompted missed items to avoid repeating toasts
+  const promptedMissedItems = useRef<Set<string>>(new Set());
+
+  // Adaptation Agent: Adjusts to changing schedule circumstances by detecting and prompting for missed blocks
+  useEffect(() => {
+    if (!approvedPlan || planStatus !== 'executing') return;
+
+    const intervalId = setInterval(() => {
+      const now = new Date();
+
+      approvedPlan.items.forEach(item => {
+        if (item.status === 'pending' || item.status === 'in-progress') {
+          // If we already prompted for this, skip
+          if (promptedMissedItems.current.has(item.id)) return;
+
+          const parts = item.timeSlot.split('-');
+          const endStr = parts.length > 1 ? parts[1] : null;
+          if (endStr) {
+            const match = endStr.trim().match(/(\d+):(\d+)\s*(am|pm)/i);
+            if (match) {
+              let [_, h, m, ampm] = match;
+              let hours = parseInt(h, 10);
+              const mins = parseInt(m, 10);
+              if (ampm.toLowerCase() === 'pm' && hours < 12) hours += 12;
+              if (ampm.toLowerCase() === 'am' && hours === 12) hours = 0;
+              
+              const d = new Date(item.date);
+              d.setHours(hours, mins, 0, 0);
+              
+              if (now.getTime() > d.getTime()) {
+                promptedMissedItems.current.add(item.id);
+                
+                toast(`Missed Focus Block: ${item.taskTitle}`, {
+                  description: "Did you miss this focus block?",
+                  icon: <Activity className="w-4 h-4" />,
+                  duration: Infinity, // Keep it open until user acts
+                  action: {
+                    label: "Yes, skip it",
+                    onClick: () => {
+                      addPlanExecutionLog(`Adaptation Agent: User confirmed missed block for "${item.taskTitle}". Skipping...`);
+                      updatePlanItemStatus(item.id, 'skipped');
+                    }
+                  },
+                  cancel: {
+                    label: "No, I did it",
+                    onClick: () => {
+                      addPlanExecutionLog(`Adaptation Agent: User completed block for "${item.taskTitle}".`);
+                      updatePlanItemStatus(item.id, 'completed');
+                    }
+                  }
+                });
+              }
+            }
+          }
+        }
+      });
+
+    }, 60000); // Evaluates schedule changes every 60 seconds
+
+    return () => clearInterval(intervalId);
+  }, [approvedPlan, planStatus, addPlanExecutionLog, updatePlanItemStatus]);
+
   // Patrol simulation
   const handleTriggerPatrol = () => {
     if (!approvedPlan) return;
@@ -77,7 +139,8 @@ export default function TaskPlanPage() {
     }
     toast.info("NEXUS Planning Agent is synthesizing a realistic timeline...");
     await generateProposedPlan();
-    toast.success("Timeline successfully generated! Awaiting your approval.");
+    approvePlan();
+    toast.success("Timeline successfully generated and execution agent is active.");
   };
 
   const handleStartPlanClick = () => {
@@ -193,14 +256,13 @@ export default function TaskPlanPage() {
             </div>
           )}
 
-          {/* 3. PROPOSED STATE: Plan Created but Needs User Click on "Start Plan" */}
+          {/* 3. PROPOSED STATE: Handled automatically */}
           {planStatus === 'proposed' && proposedPlan && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="flex flex-col gap-6"
             >
-              {/* Proposal Header Banner */}
               <div className="bg-gradient-to-r from-amber-500/10 to-indigo-500/5 border border-amber-500/20 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="flex-1">
                   <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 bg-amber-500/5 px-2.5 py-1 rounded-full border border-amber-500/10">
@@ -210,78 +272,8 @@ export default function TaskPlanPage() {
                     Plan Objective: {proposedPlan.objective}
                   </h3>
                   <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    This sequence distributes your focus time across all pending issues, ensuring each subtask completes safely prior to deadline thresholds. Review the proposal below, then activate the sequence.
+                    This sequence distributes your focus time across all pending issues. Activating autonomously...
                   </p>
-                </div>
-                
-                {/* START PLAN BUTTON - CRITICAL FOR REQUIREMENT */}
-                <button
-                  onClick={handleStartPlanClick}
-                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-7 py-3.5 rounded-full transition-all shadow-lg shadow-emerald-600/15 hover:shadow-emerald-600/30 active:scale-[0.98] whitespace-nowrap self-start md:self-center"
-                >
-                  <Play className="h-4.5 w-4.5 fill-current text-emerald-100" />
-                  <span>Start Plan</span>
-                </button>
-              </div>
-
-              {/* Proposed Timeline Items */}
-              <div className="flex flex-col gap-4">
-                <h4 className="text-xs font-mono text-slate-500 uppercase tracking-widest pl-2">
-                  Draft Focus Schedule ({proposedPlan.items.length} Blocks Proposed)
-                </h4>
-                
-                <div className="space-y-3">
-                  {proposedPlan.items.map((item, idx) => (
-                    <div 
-                      key={item.id}
-                      className="group bg-[#111113] hover:bg-[#151518] border border-slate-800/80 hover:border-slate-700/80 rounded-xl p-4 flex gap-4 transition-all"
-                    >
-                      {/* Timeline Node */}
-                      <div className="flex flex-col items-center">
-                        <div className="h-8 w-8 rounded-full bg-slate-900 border border-slate-800 text-slate-400 font-mono text-xs flex items-center justify-center">
-                          {idx + 1}
-                        </div>
-                        {idx < proposedPlan.items.length - 1 && (
-                          <div className="w-px flex-1 bg-slate-800/80 my-2" />
-                        )}
-                      </div>
-
-                      {/* Details */}
-                      <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                        <div>
-                          <div className="flex items-center flex-wrap gap-2">
-                            <span className="text-xs font-semibold text-slate-200">
-                              {item.taskTitle}
-                            </span>
-                            {item.subtaskTitle && (
-                              <>
-                                <ChevronRight className="h-3 w-3 text-slate-600" />
-                                <span className="text-xs font-mono text-indigo-400 bg-indigo-500/5 px-2 py-0.5 rounded border border-indigo-500/10">
-                                  {item.subtaskTitle}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                          <p className="text-xs text-slate-400 mt-1.5">
-                            {item.description}
-                          </p>
-                        </div>
-
-                        {/* Timing details */}
-                        <div className="flex items-center gap-4 text-right font-mono">
-                          <div className="flex flex-col items-end">
-                            <span className="text-xs text-slate-300 flex items-center gap-1">
-                              <Clock className="h-3.5 w-3.5 text-indigo-400/80" />
-                              {item.timeSlot}
-                            </span>
-                            <span className="text-[10px] text-slate-500 mt-0.5">
-                              {item.date} • {item.durationMinutes} min focus
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
                 </div>
               </div>
             </motion.div>

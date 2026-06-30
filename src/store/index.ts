@@ -13,8 +13,10 @@ interface AppState {
   proposedPlan: TaskPlan | null;
   approvedPlan: TaskPlan | null;
   planStatus: 'idle' | 'generating' | 'proposed' | 'approved' | 'executing';
+  isFocusPlanPopupVisible: boolean;
   setUser: (user: any | null) => void;
   setPreferences: (prefs: UserPreferences) => void;
+  setFocusPlanPopupVisible: (visible: boolean) => void;
   addTask: (task: Task) => void;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
@@ -51,12 +53,23 @@ export const useAppStore = create<AppState>()(
       proposedPlan: null,
       approvedPlan: null,
       planStatus: 'idle',
+      isFocusPlanPopupVisible: false,
+      setFocusPlanPopupVisible: (visible) => set({ isFocusPlanPopupVisible: visible }),
       setUser: (user) => set({ user }),
       setPreferences: (preferences) => set({ preferences }),
       addTask: (task) => {
-        set((state) => ({ tasks: [...state.tasks, task] }));
+        set((state) => ({ tasks: [...state.tasks, task], isFocusPlanPopupVisible: true }));
         get().autoEvaluatePrioritiesAndFocus();
-        get().triggerAutoAIPlan();
+        get().triggerAutoAIPlan()
+          .catch(err => console.warn("Auto AI Prioritize failed:", err))
+          .finally(() => {
+            get().generateProposedPlan().then(() => {
+              const state = get();
+              if (state.proposedPlan) {
+                state.approvePlan();
+              }
+            });
+          });
       },
       updateTask: (taskId, updates) => {
         set((state) => ({
@@ -67,16 +80,36 @@ export const useAppStore = create<AppState>()(
         const coreKeys = ['title', 'status', 'deadline', 'description'];
         const hasCoreChange = Object.keys(updates).some(key => coreKeys.includes(key));
         if (hasCoreChange) {
-          get().triggerAutoAIPlan();
+          set({ isFocusPlanPopupVisible: true });
+          get().triggerAutoAIPlan()
+            .catch(err => console.warn("Auto AI Prioritize failed:", err))
+            .finally(() => {
+              get().generateProposedPlan().then(() => {
+                const state = get();
+                if (state.proposedPlan) {
+                  state.approvePlan();
+                }
+              });
+            });
         }
       },
       deleteTask: (taskId) => {
         set((state) => ({ 
           tasks: state.tasks.filter((t) => t.id !== taskId),
-          primaryFocusTaskId: state.primaryFocusTaskId === taskId ? null : state.primaryFocusTaskId
+          primaryFocusTaskId: state.primaryFocusTaskId === taskId ? null : state.primaryFocusTaskId,
+          isFocusPlanPopupVisible: true
         }));
         get().autoEvaluatePrioritiesAndFocus();
-        get().triggerAutoAIPlan();
+        get().triggerAutoAIPlan()
+          .catch(err => console.warn("Auto AI Prioritize failed:", err))
+          .finally(() => {
+            get().generateProposedPlan().then(() => {
+              const state = get();
+              if (state.proposedPlan) {
+                state.approvePlan();
+              }
+            });
+          });
       },
       setTasks: (tasks) => {
         set({ tasks });
@@ -206,8 +239,73 @@ export const useAppStore = create<AppState>()(
             throw new Error("Invalid plan data received");
           }
         } catch (err) {
-          console.error("Plan generation failed:", err);
-          set({ planStatus: 'idle' });
+          console.error("Plan generation failed, using fallback:", err);
+          const pending = currentTasks.filter(t => t.status !== 'completed');
+          
+          const sortedPending = [...pending].sort((a, b) => {
+            const dateA = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+            const dateB = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+            if (dateA !== dateB) return dateA - dateB;
+            const scoreA = a.priorityScore || 0;
+            const scoreB = b.priorityScore || 0;
+            return scoreB - scoreA;
+          });
+
+          let currentTime = new Date();
+          const formatTime12 = (date: Date) => {
+            const h24 = date.getHours();
+            const m = date.getMinutes().toString().padStart(2, '0');
+            const ampm = h24 >= 12 ? 'pm' : 'am';
+            const h12 = h24 % 12 || 12;
+            return `${h12}:${m} ${ampm}`;
+          };
+
+          const fallbackItems = [];
+          
+          for (const t of sortedPending) {
+            let durationMinutes = 30;
+            
+            if (t.deadline) {
+              const deadlineTime = new Date(t.deadline).getTime();
+              const remainingMs = deadlineTime - currentTime.getTime();
+              
+              if (remainingMs <= 0) continue;
+              
+              const remainingMinutes = Math.floor(remainingMs / 60000);
+              if (durationMinutes > remainingMinutes) {
+                durationMinutes = remainingMinutes;
+              }
+            }
+            
+            if (durationMinutes <= 0) continue;
+
+            const startTime = new Date(currentTime);
+            const endTime = new Date(startTime.getTime() + durationMinutes * 60000);
+            
+            fallbackItems.push({
+              id: 'item-' + t.id + '-' + Math.random().toString(36).substring(2, 9),
+              taskId: t.id,
+              taskTitle: t.title,
+              subtaskId: null,
+              subtaskTitle: null,
+              durationMinutes: durationMinutes,
+              date: startTime.toLocaleDateString(),
+              timeSlot: `${formatTime12(startTime)} - ${formatTime12(endTime)}`,
+              description: `Focus on ${t.title}`
+            });
+            
+            currentTime = new Date(endTime);
+          }
+
+          const fallbackPlan = {
+            id: 'fallback-' + Date.now(),
+            objective: "Complete pending tasks efficiently (Fallback Plan)",
+            items: fallbackItems,
+            createdAt: new Date().toISOString(),
+            status: 'proposed' as const,
+            executionLogs: ['Generated via local autonomous fallback due to network latency']
+          };
+          set({ proposedPlan: fallbackPlan as any, planStatus: 'proposed' });
         }
       },
       approvePlan: () => {
