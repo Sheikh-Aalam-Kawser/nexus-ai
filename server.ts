@@ -28,6 +28,20 @@ function getAIClient(req: express.Request): any {
   });
 }
 
+// Helper to safely execute AI requests and handle rate limits gracefully
+async function safeGenerateContent(aiInstance: any, options: any, fallbackData: any) {
+  try {
+    const response = await aiInstance.models.generateContent(options);
+    return JSON.parse(response.text || JSON.stringify(fallbackData));
+  } catch (err: any) {
+    if (err?.message?.includes("429") || err?.message?.includes("quota") || err?.status === 429 || err?.status === "RESOURCE_EXHAUSTED") {
+      console.warn("Gemini API Rate Limit hit. Using fallback data to maintain app functionality.");
+      return fallbackData;
+    }
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 1. Orchestrator + Decomposer Agent (Task Breakdown)
 // ---------------------------------------------------------------------------
@@ -51,7 +65,7 @@ Collaborative sequence to execute:
 5. "Autonomous task automation agent": Defines automated triggers, drafts system action templates, or sets context alarms.
 6. "Orchestrating agent": Coordinates the sequence, performs final quality assurance, and validates that all deliverables are cohesive.`;
 
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents: prompt,
       config: {
@@ -100,9 +114,23 @@ Collaborative sequence to execute:
           required: ["subtasks", "urgency", "impact", "effort", "agentLogs"]
         }
       }
+    }, {
+      subtasks: [
+        { id: "sub-1-fb", title: "Draft requirements", estimatedMinutes: 30, completed: false },
+        { id: "sub-2-fb", title: "Complete task", estimatedMinutes: 60, completed: false }
+      ],
+      urgency: 5, impact: 5, effort: 5,
+      agentLogs: {
+        perceivingAgentLog: "API Quota exceeded. Using offline fallback mode.",
+        prioritizingAgentLog: "API Quota exceeded. Assigned default priority.",
+        decomposingAgentLog: "API Quota exceeded. Basic decomposition applied.",
+        planningAgentLog: "API Quota exceeded. Suggest standard working hours.",
+        autonomousAutomationLog: "API Quota exceeded. Background tasks suspended.",
+        orchestratingAgentLog: "Offline fallback orchestrator engaged."
+      }
     });
 
-    res.json(JSON.parse(response.text || '{}'));
+    res.json(result);
   } catch (error: any) {
     console.error("Decomposer error:", error);
     res.status(500).json({ error: error.message });
@@ -123,7 +151,7 @@ Subtasks: ${JSON.stringify(subtasks)}
 User Preferences (Peak hours, DND): ${JSON.stringify(preferences)}
 Existing Events: ${JSON.stringify(existingEvents || [])}`;
 
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents: prompt,
       config: {
@@ -142,9 +170,9 @@ Existing Events: ${JSON.stringify(existingEvents || [])}`;
           }
         }
       }
-    });
+    }, []);
 
-    res.json(JSON.parse(response.text || '[]'));
+    res.json(result);
   } catch (error: any) {
     console.error("Scheduler error:", error);
     res.status(500).json({ error: error.message });
@@ -171,7 +199,7 @@ app.post("/api/agents/voice", async (req, res) => {
       parts: [{ text: `Current Time: ${new Date().toISOString()}\nUser input: "${transcript}"` }]
     });
 
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents,
       config: {
@@ -195,8 +223,10 @@ app.post("/api/agents/voice", async (req, res) => {
           required: ["responseText"]
         }
       }
+    }, {
+      responseText: "I'm sorry, the AI API is currently rate limited. Please try again in a few moments."
     });
-    res.json(JSON.parse(response.text || '{}'));
+    res.json(result);
   } catch (error: any) {
     console.error("Voice parsing error:", error);
     res.status(500).json({ error: error.message });
@@ -211,7 +241,7 @@ app.post("/api/agents/nudge", async (req, res) => {
   const { task, userState } = req.body;
   try {
     const aiInstance = getAIClient(req);
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents: `Task: ${JSON.stringify(task)}\nUser State: ${JSON.stringify(userState)}`,
       config: {
@@ -225,8 +255,11 @@ app.post("/api/agents/nudge", async (req, res) => {
           }
         }
       }
+    }, {
+      message: "It looks like you're offline or quota exceeded. Time for a quick break?",
+      suggestedAction: "Stretch for 2 minutes"
     });
-    res.json(JSON.parse(response.text || '{}'));
+    res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -239,7 +272,7 @@ app.post("/api/agents/execute", async (req, res) => {
   const { actionType, details } = req.body;
   try {
     const aiInstance = getAIClient(req);
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents: `Action: ${actionType}\nDetails: ${JSON.stringify(details)}`,
       config: {
@@ -253,9 +286,12 @@ app.post("/api/agents/execute", async (req, res) => {
           }
         }
       }
+    }, {
+      status: "fallback",
+      generatedContent: "Could not generate content due to API rate limits. Please try again later."
     });
     
-    const parsed = JSON.parse(response.text || '{}');
+    const parsed = result;
 
     if (actionType === 'generate_doc') {
       const authHeader = req.headers.authorization;
@@ -306,7 +342,7 @@ app.post("/api/agents/dynamic_actions", async (req, res) => {
   const { taskTitle, taskDescription } = req.body;
   try {
     const aiInstance = getAIClient(req);
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents: `Task Title: ${taskTitle}\nTask Description: ${taskDescription || 'None'}`,
       config: {
@@ -328,8 +364,10 @@ app.post("/api/agents/dynamic_actions", async (req, res) => {
           }
         }
       }
-    });
-    res.json(JSON.parse(response.text || '[]'));
+    }, [
+      { id: "fallback_1", label: "Generate Summary", actionText: "generate a summary", needsCreds: false, completionText: "Summary ready", outputMock: "Fallback Summary" }
+    ]);
+    res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -342,7 +380,7 @@ app.post("/api/agents/reflect", async (req, res) => {
   const { completedTasks } = req.body;
   try {
     const aiInstance = getAIClient(req);
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents: `Completed Tasks: ${JSON.stringify(completedTasks)}`,
       config: {
@@ -358,8 +396,10 @@ app.post("/api/agents/reflect", async (req, res) => {
           }
         }
       }
+    }, {
+      insights: ["Keep up the good work!", "Take breaks when needed.", "API Quota limited."]
     });
-    res.json(JSON.parse(response.text || '{}'));
+    res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -376,7 +416,7 @@ app.post("/api/agents/reprioritize", async (req, res) => {
 
   try {
     const aiInstance = getAIClient(req);
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents: `Current tasks: ${JSON.stringify(tasks)}\nCurrent Time: ${new Date().toISOString()}`,
       config: {
@@ -416,9 +456,16 @@ app.post("/api/agents/reprioritize", async (req, res) => {
           required: ["tasks", "globalPlanInsight"]
         }
       }
+    }, {
+      tasks: tasks.map((t: any) => ({
+        id: t.id,
+        priorityScore: 5, urgency: 5, impact: 5, effort: 5,
+        subtasks: t.subtasks || []
+      })),
+      globalPlanInsight: "AI prioritization is currently unavailable due to rate limits."
     });
 
-    res.json(JSON.parse(response.text || '{}'));
+    res.json(result);
   } catch (error: any) {
     console.error("Reprioritization API error:", error);
     const msg = error.message || String(error);
@@ -453,7 +500,7 @@ app.post("/api/agents/generate-plan", async (req, res) => {
 
   try {
     const aiInstance = getAIClient(req);
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents: `Generate a realistic, structured, chronologically sequenced execution plan to complete all pending tasks before their deadlines.
 Current tasks: ${JSON.stringify(pendingTasks)}
@@ -490,9 +537,27 @@ Current Time: ${new Date().toISOString()}`,
           required: ["id", "objective", "items"]
         }
       }
+    }, {
+      id: "plan-" + Math.random().toString(36).substring(2, 11),
+      objective: "API Quota exceeded. Please try again later.",
+      items: pendingTasks.map((t: any, idx: number) => {
+        const startH = (9 + idx) % 24;
+        const endH = (10 + idx) % 24;
+        const formatH = (h: number) => `${h % 12 || 12}:00 ${h >= 12 ? 'pm' : 'am'}`;
+        return {
+          id: "pi-" + idx,
+          taskId: t.id,
+          taskTitle: t.title,
+          timeSlot: `${formatH(startH)} - ${formatH(endH)}`,
+          durationMinutes: 60,
+          date: new Date().toISOString().split('T')[0],
+          description: "Focus session for " + t.title,
+          status: "pending"
+        };
+      })
     });
 
-    res.json(JSON.parse(response.text || '{}'));
+    res.json(result);
   } catch (error: any) {
     console.error("Plan generation API error:", error);
     res.status(500).json({ error: error.message || "Failed to generate plan." });
@@ -526,7 +591,7 @@ app.post("/api/agents/intake", async (req, res) => {
       parts: [{ text: `Current Time: ${new Date().toISOString()}\n\nRequest: ${textPrompt}` }]
     });
 
-    const response = await aiInstance.models.generateContent({
+    const result = await safeGenerateContent(aiInstance, {
       model: "gemini-2.5-flash",
       contents,
       config: {
@@ -552,8 +617,16 @@ app.post("/api/agents/intake", async (req, res) => {
           required: ["tasks"]
         }
       }
+    }, {
+      tasks: [
+        {
+          title: "API Limit Exceeded (Fallback task)",
+          description: "Could not parse document due to API limits. Please add tasks manually.",
+          priorityScore: 50
+        }
+      ]
     });
-    res.json(JSON.parse(response.text || '{}'));
+    res.json(result);
   } catch (error: any) {
     console.error("AI Intake parsing error:", error);
     res.status(500).json({ error: error.message });

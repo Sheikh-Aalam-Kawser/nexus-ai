@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { signIn } from "@/lib/firebase";
 import { useAppStore } from "@/store";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Brain, Clock, ShieldAlert, Cpu, ArrowRight, Activity, Zap, AlertTriangle, Wifi, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Logo } from "@/components/Logo";
@@ -16,12 +16,25 @@ export default function Landing() {
       const result = await signIn();
       if (result) {
         setUser({ uid: result.user.uid, displayName: result.user.displayName, email: result.user.email });
+        
+        // Trigger calendar sync immediately after sign in
+        useAppStore.getState().ingestCalendarEvents().then((syncResult) => {
+          if (syncResult.imported > 0) {
+            import('sonner').then(({ toast }) => {
+              toast.success(`NEXUS Auto-Sync: Imported ${syncResult.imported} tasks from Calendar.`);
+              if (syncResult.emergencies > 0) {
+                toast.warning(`WARNING: ${syncResult.emergencies} upcoming emergency deadline(s) detected!`);
+                useAppStore.getState().setEmergencyMode(true);
+              }
+            });
+          }
+        });
+        
         navigate('/dashboard');
       }
-    } catch (error) {
-      toast.error("Sign in failed. Using preview mode.");
-      setUser({ uid: 'mock-' + Date.now(), displayName: 'Demo User', email: 'demo@example.com' });
-      navigate('/dashboard');
+    } catch (error: any) {
+      console.error("Sign in error:", error);
+      toast.error(error?.message || "Sign in failed. Please try again.");
     }
   };
 
@@ -38,12 +51,15 @@ export default function Landing() {
             <Logo className="h-full w-full" />
           </div>
           <div className="flex flex-col justify-center">
-            <span className="text-xl font-black tracking-tighter text-slate-900 uppercase">
-              NEXUS
+            <span className="text-xl font-black tracking-tighter text-slate-900">
+              Nexus-ai
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
+          <a href="https://nexus-518778203489.us-west1.run.app/privacy" className="text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors hidden sm:block">
+            Privacy Policy
+          </a>
           <Button 
             variant="ghost" 
             className="hidden sm:flex text-sm font-medium text-slate-600 hover:text-slate-900"
@@ -197,7 +213,12 @@ export default function Landing() {
       {/* Footer */}
       <footer className="relative z-10 border-t border-slate-200/60 py-8 text-center text-slate-400 text-sm font-medium">
         <p>Engineered for maximum cognitive output.</p>
-        <p className="mt-2 text-xs font-mono uppercase tracking-widest text-slate-300">© {new Date().getFullYear()} NEXUS Systems</p>
+        <p className="mt-2 text-xs font-mono uppercase tracking-widest text-slate-300">© {new Date().getFullYear()} Nexus-ai Systems</p>
+        <div className="mt-4">
+          <a href="https://nexus-518778203489.us-west1.run.app/privacy" className="text-emerald-600 hover:text-emerald-700 underline transition-colors">
+            Privacy Policy
+          </a>
+        </div>
       </footer>
     </div>
   );

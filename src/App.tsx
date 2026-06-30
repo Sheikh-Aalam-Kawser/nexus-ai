@@ -6,6 +6,7 @@ import Landing from './pages/Landing';
 import MyTasks from './pages/MyTasks';
 import Profile from './pages/Profile';
 import TaskPlanPage from './pages/TaskPlanPage';
+import PrivacyPolicy from './pages/PrivacyPolicy';
 import NavBar from './components/NavBar';
 import { Toaster } from '@/components/ui/sonner';
 import { initAuth } from './lib/firebase';
@@ -56,6 +57,7 @@ export default function App() {
       <NavBar />
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/" />} />
         <Route path="/tasks" element={user ? <MyTasks /> : <Navigate to="/" />} />
         <Route path="/plan" element={user ? <TaskPlanPage /> : <Navigate to="/" />} />
