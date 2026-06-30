@@ -10,15 +10,31 @@ import {
   Menu, 
   X,
   Sparkles,
-  Calendar
+  Calendar,
+  WifiOff
 } from "lucide-react";
+import { Logo } from "./Logo";
 
 export default function NavBar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { setUser, user } = useAppStore();
   const [isOpen, setIsOpen] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Close dropdown when path changes or on click outside
   useEffect(() => {
@@ -82,37 +98,24 @@ export default function NavBar() {
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         
         {/* Brand / Logo */}
-        <Link 
-          to="/dashboard" 
-          className="flex items-center gap-2 group focus:outline-none focus:ring-2 focus:ring-emerald-500/50 rounded-lg p-1"
-        >
-          <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center border border-emerald-500/20 group-hover:border-emerald-500/40 transition-colors">
-            <Sparkles className="h-4.5 w-4.5 text-emerald-600 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold tracking-tight text-slate-900 font-mono uppercase">
-              NEXUS
-            </span>
-            <span className="text-[9px] font-mono tracking-widest text-emerald-600 uppercase leading-none">
-              Focus Engine
-            </span>
-          </div>
-        </Link>
-
-        {/* Desktop Navigation (horizontal line, hidden on mobile) */}
-        <div className="hidden md:flex items-center gap-6" id="desktop-navigation">
-          <button
-            onClick={() => {
-              useAppStore.getState().setEmergencyMode(true);
-              navigate('/dashboard');
-            }}
-            className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 px-4 py-1.5 rounded-full font-mono text-xs uppercase tracking-widest transition-all animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:shadow-[0_0_25px_rgba(239,68,68,0.4)]"
-            title="Activate Emergency Protocol for imminent deadlines"
+        <div className="flex items-center flex-1">
+          <Link 
+            to="/dashboard" 
+            className="flex items-center gap-3 group focus:outline-none focus:ring-2 focus:ring-emerald-500/50 rounded-lg p-1 w-fit"
           >
-            <Sparkles className="h-4 w-4" />
-            Emergency Protocol
-          </button>
+            <div className="h-8 w-8 flex items-center justify-center transition-transform group-hover:scale-105">
+              <Logo className="h-full w-full" />
+            </div>
+            <div className="flex flex-col justify-center">
+              <span className="text-xl font-black tracking-tighter text-slate-900 uppercase">
+                NEXUS
+              </span>
+            </div>
+          </Link>
+        </div>
 
+        {/* Desktop Navigation Links */}
+        <div className="hidden md:flex items-center justify-center gap-2 shrink-0" id="desktop-navigation-links">
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
@@ -120,10 +123,10 @@ export default function NavBar() {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`relative flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-mono transition-all duration-200 outline-none focus:ring-2 focus:ring-slate-700 ${
+                className={`relative flex items-center gap-2 px-4 py-2 rounded-full text-xs font-mono transition-all duration-200 outline-none focus:ring-2 focus:ring-slate-700 ${
                   isActive 
                     ? "text-slate-900 bg-slate-100 border border-slate-200" 
-                    : "text-slate-500 hover:text-slate-900"
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
                 }`}
               >
                 <Icon className={`h-4 w-4 ${item.color}`} />
@@ -138,13 +141,34 @@ export default function NavBar() {
               </Link>
             );
           })}
+        </div>
+
+        {/* Desktop Actions */}
+        <div className="hidden md:flex items-center justify-end gap-4 flex-1" id="desktop-actions">
+          {isOffline && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 text-amber-600 border border-amber-500/20 rounded-full font-mono text-xs uppercase tracking-wider" title="You are currently offline. Changes will sync when reconnected.">
+              <WifiOff className="h-3.5 w-3.5" />
+              <span>Offline Mode</span>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              useAppStore.getState().setEmergencyMode(true);
+              navigate('/dashboard');
+            }}
+            className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 px-4 py-1.5 rounded-full font-mono text-xs uppercase tracking-widest transition-all animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:shadow-[0_0_25px_rgba(239,68,68,0.4)]"
+            title="Activate Emergency Protocol for imminent deadlines"
+          >
+            <Sparkles className="h-4 w-4" />
+            Emergency Protocol
+          </button>
 
           <div className="h-4 w-px bg-slate-200/80 mx-1" />
 
           {/* Logout Button */}
           <button
             onClick={handleLogout}
-            className="flex items-center gap-2 text-xs font-mono text-slate-500 hover:text-red-400 transition-colors px-3 py-1.5 rounded-full outline-none focus:ring-2 focus:ring-red-500/50"
+            className="flex items-center gap-2 text-xs font-mono text-slate-500 hover:text-red-400 hover:bg-red-50/50 transition-colors px-3 py-1.5 rounded-full outline-none focus:ring-2 focus:ring-red-500/50"
             id="desktop-logout"
           >
             <LogOut className="h-4 w-4 text-red-400/80" />
@@ -181,6 +205,13 @@ export default function NavBar() {
                   </span>
                 </div>
 
+                {isOffline && (
+                  <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-mono text-amber-600 bg-amber-500/10 border border-amber-500/20 mb-1">
+                    <WifiOff className="h-4 w-4" />
+                    <span>Offline Mode</span>
+                  </div>
+                )}
+
                 {navItems.map((item) => {
                   const isActive = location.pathname === item.path;
                   const Icon = item.icon;
@@ -200,6 +231,19 @@ export default function NavBar() {
                     </Link>
                   );
                 })}
+
+                <div className="h-px bg-slate-100/80 my-1" />
+
+                <button
+                  onClick={() => {
+                    useAppStore.getState().setEmergencyMode(true);
+                    setIsOpen(false);
+                  }}
+                  className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-mono font-medium text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all text-left w-full outline-none"
+                >
+                  <Sparkles className="h-4.5 w-4.5" />
+                  <span>Emergency Protocol</span>
+                </button>
 
                 <div className="h-px bg-slate-100/80 my-1" />
 

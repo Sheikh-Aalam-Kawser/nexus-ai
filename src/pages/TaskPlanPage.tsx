@@ -179,10 +179,10 @@ export default function TaskPlanPage() {
               Cooperative Multi-Agent System
             </span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 mt-1.5 font-sans">
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-slate-900 leading-tight mt-3 font-sans">
             Autonomous Focus Planner
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-base text-slate-500 mt-2 font-medium max-w-2xl">
             Let the planning and execution agents design and maintain your daily timeline constraint-free.
           </p>
         </div>
@@ -285,7 +285,7 @@ export default function TaskPlanPage() {
 
           {/* 2. GENERATING STATE: Loading Feedback */}
           {planStatus === 'generating' && (
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-12 text-center flex flex-col items-center justify-center min-h-[400px]">
+            <div className="bg-white border border-slate-200/60 rounded-3xl p-12 text-center flex flex-col items-center justify-center min-h-[400px] shadow-sm">
               <div className="relative mb-6">
                 <div className="h-16 w-16 rounded-full border-2 border-indigo-500/10 border-t-indigo-400 animate-spin flex items-center justify-center" />
                 <Cpu className="h-6 w-6 text-indigo-600 absolute inset-0 m-auto animate-pulse" />
@@ -330,7 +330,7 @@ export default function TaskPlanPage() {
               className="flex flex-col gap-6"
             >
               {/* Active Plan Header */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl p-6">
+              <div className="bg-white border border-slate-200/60 rounded-3xl p-8 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between flex-wrap gap-4">
                   <div>
                     <span className="text-[9px] font-mono uppercase tracking-widest text-emerald-600 bg-emerald-500/5 border border-emerald-500/20 px-2 py-0.5 rounded">
@@ -487,7 +487,7 @@ export default function TaskPlanPage() {
         <div className="lg:col-span-4 flex flex-col gap-6">
           
           {/* Execution Agent Status Console */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 flex flex-col gap-4">
+          <div className="bg-white border border-slate-200/60 rounded-3xl p-8 flex flex-col gap-5 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
               <div className="flex items-center gap-2">
                 <Cpu className="h-4.5 w-4.5 text-emerald-600" />

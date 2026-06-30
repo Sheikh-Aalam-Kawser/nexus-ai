@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { VoiceOrb } from "@/components/VoiceOrb";
 import { AIntakeDialog } from "@/components/AIntakeDialog";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // Real-time Subtask Timer for 30-minute intervals
 function SubtaskTimer({ subtaskId }: { subtaskId: string }) {
@@ -69,12 +69,19 @@ import { Task } from "@/types";
 import { format, isPast, formatDistanceToNow } from "date-fns";
 import { motion, AnimatePresence } from "motion/react";
 import { useNavigate } from "react-router-dom";
+import { initAuth, googleSignIn, getAccessToken } from "../lib/auth";
+import { User as FirebaseUser } from "firebase/auth";
 
 // Real-time Countdown Timer for Focus Task
 function DeadlineTimer({ deadlineStr, onEmergency }: { deadlineStr: string, onEmergency?: () => void }) {
   const [timeLeft, setTimeLeft] = useState("");
   const [isOverdue, setIsOverdue] = useState(false);
   const [isEmergency, setIsEmergency] = useState(false);
+  const onEmergencyRef = useRef(onEmergency);
+
+  useEffect(() => {
+    onEmergencyRef.current = onEmergency;
+  }, [onEmergency]);
 
   useEffect(() => {
     const calculateTime = () => {
@@ -82,7 +89,7 @@ function DeadlineTimer({ deadlineStr, onEmergency }: { deadlineStr: string, onEm
       if (difference <= 0) {
         setIsOverdue(true);
         setIsEmergency(true);
-        if (onEmergency) onEmergency();
+        if (onEmergencyRef.current) onEmergencyRef.current();
         const overdueMs = Math.abs(difference);
         const hours = Math.floor(overdueMs / (1000 * 60 * 60));
         const minutes = Math.floor((overdueMs / 1000 / 60) % 60);
@@ -100,7 +107,7 @@ function DeadlineTimer({ deadlineStr, onEmergency }: { deadlineStr: string, onEm
       const totalMinutesLeft = (difference / 1000 / 60);
       if (totalMinutesLeft < 30) {
         setIsEmergency(true);
-        if (onEmergency) onEmergency();
+        if (onEmergencyRef.current) onEmergencyRef.current();
       } else {
         setIsEmergency(false);
       }
@@ -115,7 +122,7 @@ function DeadlineTimer({ deadlineStr, onEmergency }: { deadlineStr: string, onEm
     calculateTime();
     const interval = setInterval(calculateTime, 1000);
     return () => clearInterval(interval);
-  }, [deadlineStr, onEmergency]);
+  }, [deadlineStr]);
 
   return (
     <div className={`font-mono text-xl font-bold px-4 py-2 rounded-xl border tracking-wide transition-colors ${
@@ -160,11 +167,22 @@ export default function Dashboard() {
   const [actionOutput, setActionOutput] = useState<string>("");
   const [isExecutingAction, setIsExecutingAction] = useState(false);
   const [isOrchestrating, setIsOrchestrating] = useState(false);
-  const [helperState, setHelperState] = useState<'idle' | 'asking' | 'need_creds' | 'done'>('idle');
+  const [helperState, setHelperState] = useState<'idle' | 'asking' | 'done'>('idle');
   const [helperSelectedAction, setHelperSelectedAction] = useState<DynamicAction | null>(null);
-  const [helperToken, setHelperToken] = useState("");
   const [dynamicActionsList, setDynamicActionsList] = useState<DynamicAction[]>([]);
   const [isFetchingActions, setIsFetchingActions] = useState(false);
+
+  const [needsAuth, setNeedsAuth] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  useEffect(() => {
+    initAuth(
+      (u, t) => { setNeedsAuth(false); setToken(t); setFirebaseUser(u); },
+      () => setNeedsAuth(true)
+    );
+  }, []);
 
   // Derive task states
   const pendingTasks = tasks.filter(t => t.status !== 'completed').sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0));
@@ -192,19 +210,23 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskTitle: focusTask.title, taskDescription: focusTask.description })
       })
-      .then(res => res.json())
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "Failed to fetch actions");
+        }
+        return res.json();
+      })
       .then(data => {
         if (Array.isArray(data) && data.length > 0) {
           setDynamicActionsList(data);
         } else {
-          // Fallback if AI fails to parse
-          setDynamicActionsList([
-            { id: 'generate_doc', label: 'Generate Summary', actionText: 'generate a summary and add it to your Google Drive', needsCreds: true, completionText: 'Your document has been created.', outputMock: 'Google Doc Generated: "Summary"' },
-            { id: 'create_action_plan', label: 'Create Action Plan', actionText: 'create a detailed action plan', needsCreds: false, completionText: 'Your action plan is ready.', outputMock: 'Action Plan:\n1. Execute phase 1.' }
-          ]);
+          throw new Error("Invalid response format");
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error(err);
+        toast.error(`Failed to generate actions: ${err.message}`);
         setDynamicActionsList([
             { id: 'generate_doc', label: 'Generate Summary', actionText: 'generate a summary and add it to your Google Drive', needsCreds: true, completionText: 'Your document has been created.', outputMock: 'Google Doc Generated: "Summary"' },
             { id: 'create_action_plan', label: 'Create Action Plan', actionText: 'create a detailed action plan', needsCreds: false, completionText: 'Your action plan is ready.', outputMock: 'Action Plan:\n1. Execute phase 1.' }
@@ -402,11 +424,16 @@ export default function Dashboard() {
     setIsExecutingAction(true);
     setActionOutput("");
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/agents/execute', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers,
         body: JSON.stringify({
           actionType,
           details: {
@@ -417,7 +444,10 @@ export default function Dashboard() {
           }
         })
       });
-      if (!res.ok) throw new Error("Execution Agent error");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Execution Agent error");
+      }
       const data = await res.json();
       
       setActionOutput(data.generatedContent || "Action prepared successfully.");
@@ -425,7 +455,7 @@ export default function Dashboard() {
       toast.success(`Action payload drafted by NEXUS!`);
     } catch (err: any) {
       console.error(err);
-      toast.error("Failed to prepare automation draft.");
+      toast.error(`Failed: ${err.message}`);
       let fallback = "";
       if (actionType === 'email') {
         fallback = `Subject: Progress Update on ${focusTask.title}\n\nHi team,\n\nI am currently working on "${focusTask.title}". Here are the active planning steps I'm focused on:\n${(focusTask.subtasks || []).map(s => `- ${s.title} (${s.completed ? 'Done' : 'Pending'})`).join('\n')}\n\nI am tracking towards the deadline: ${new Date(focusTask.deadline).toLocaleString()}.\n\nBest regards,\nUser`;
@@ -489,10 +519,10 @@ export default function Dashboard() {
 
   return (
     <div className="mx-auto max-w-5xl p-6 pb-24 space-y-8 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-slate-200/50 via-transparent to-transparent min-h-screen">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-6 border-b border-slate-200/60">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Today's Plan</h1>
-          <p className="text-sm text-slate-500">Welcome back. You have {pendingTasks.length} pending tasks today.</p>
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-slate-900 leading-tight">Today's Plan</h1>
+          <p className="text-base text-slate-500 mt-2 font-medium">Welcome back. You have {pendingTasks.length} pending tasks today.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Plan: Global AI Orchestrator */}
@@ -669,50 +699,51 @@ export default function Dashboard() {
                       <p className="text-base font-medium text-slate-800">
                         Do I have your permission to {helperSelectedAction.actionText}?
                       </p>
-                      <div className="flex gap-3">
-                        <Button onClick={() => {
-                          if (helperSelectedAction.needsCreds) {
-                            setHelperState('need_creds');
-                          } else {
+                      {helperSelectedAction.needsCreds && needsAuth ? (
+                        <div className="flex flex-col gap-3">
+                          <p className="text-sm text-slate-600">This action requires Google Workspace permissions.</p>
+                          <button onClick={async () => {
+                            setIsLoggingIn(true);
+                            try {
+                              const result = await googleSignIn();
+                              if (result) {
+                                setToken(result.accessToken);
+                                setFirebaseUser(result.user);
+                                setNeedsAuth(false);
+                              }
+                            } catch (e) {
+                              toast.error("Failed to sign in.");
+                            } finally {
+                              setIsLoggingIn(false);
+                            }
+                          }} disabled={isLoggingIn} className="gsi-material-button w-fit">
+                            <div className="gsi-material-button-state"></div>
+                            <div className="gsi-material-button-content-wrapper">
+                              <div className="gsi-material-button-icon">
+                                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style={{display: 'block'}}>
+                                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                                  <path fill="none" d="M0 0h48v48H0z"></path>
+                                </svg>
+                              </div>
+                              <span className="gsi-material-button-contents">Sign in with Google</span>
+                              <span style={{display: 'none'}}>Sign in with Google</span>
+                            </div>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-3">
+                          <Button onClick={() => {
                             handleRunAction(helperSelectedAction.id, helperSelectedAction.outputMock);
                             setHelperState('done');
-                          }
-                        }} className="bg-blue-600 hover:bg-blue-700 text-white text-sm h-10 px-6 font-medium shadow-sm">
-                          Yes, please proceed
-                        </Button>
-                        <Button onClick={() => setHelperState('idle')} variant="outline" className="text-sm h-10 px-6 text-slate-600">Cancel</Button>
-                      </div>
-                    </div>
-                  );
-                }
-
-                if (helperState === 'need_creds' && helperSelectedAction) {
-                  return (
-                    <div className="space-y-4 p-5 bg-red-50/50 border border-red-100 rounded-xl">
-                      <div className="space-y-1">
-                        <p className="text-base font-semibold text-red-900">Authentication Required</p>
-                        <p className="text-sm text-red-700">Please provide your API token or credentials to securely execute this action.</p>
-                      </div>
-                      <input 
-                        type="text" 
-                        placeholder="Enter API Token" 
-                        value={helperToken}
-                        onChange={(e) => setHelperToken(e.target.value)}
-                        className="bg-white border-red-200 focus:outline-none focus:ring-1 focus:ring-red-500 w-full text-sm h-10 px-3 rounded-md border" 
-                      />
-                      <div className="flex gap-3 pt-1">
-                        <Button onClick={() => {
-                          if (helperToken) {
-                            handleRunAction(helperSelectedAction.id, helperSelectedAction.outputMock);
-                            setHelperState('done');
-                          } else {
-                            toast.error("Please enter a valid token.");
-                          }
-                        }} className="bg-red-600 hover:bg-red-700 text-white text-sm h-10 px-6 shadow-sm">
-                          Save & Proceed
-                        </Button>
-                        <Button onClick={() => setHelperState('idle')} variant="outline" className="text-sm h-10 px-6 text-red-700 border-red-200 hover:bg-red-50">Cancel</Button>
-                      </div>
+                          }} className="bg-blue-600 hover:bg-blue-700 text-white text-sm h-10 px-6 font-medium shadow-sm">
+                            Yes, please proceed
+                          </Button>
+                          <Button onClick={() => setHelperState('idle')} variant="outline" className="text-sm h-10 px-6 text-slate-600">Cancel</Button>
+                        </div>
+                      )}
                     </div>
                   );
                 }
@@ -724,7 +755,12 @@ export default function Dashboard() {
                         <CheckCircle2 className="h-5 w-5 text-emerald-600" />
                         {helperSelectedAction.completionText}
                       </p>
-                      <Button onClick={() => { setHelperState('idle'); setHelperSelectedAction(null); setHelperToken(""); }} variant="outline" className="text-sm h-10 px-6 border-emerald-200 text-emerald-800 hover:bg-emerald-100 shadow-sm">Done</Button>
+                      {actionOutput && (
+                        <div className="bg-white/80 p-3 rounded border border-emerald-100 text-sm font-mono text-emerald-800 whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                          {actionOutput}
+                        </div>
+                      )}
+                      <Button onClick={() => { setHelperState('idle'); setHelperSelectedAction(null); setActionOutput(""); }} variant="outline" className="text-sm h-10 px-6 border-emerald-200 text-emerald-800 hover:bg-emerald-100 shadow-sm">Done</Button>
                     </div>
                   );
                 }
@@ -820,8 +856,8 @@ export default function Dashboard() {
           </div>
 
           {/* Subtask Quick Completion & Decomposition Box */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div className="bg-white border border-slate-200/60 rounded-3xl p-8 shadow-sm space-y-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
               <div className="space-y-1">
                 <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
                   <Network className="h-4 w-4 text-indigo-500" /> Action Steps

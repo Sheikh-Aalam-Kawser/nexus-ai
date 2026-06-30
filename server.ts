@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { google } from 'googleapis';
 
 dotenv.config();
 
@@ -253,7 +254,46 @@ app.post("/api/agents/execute", async (req, res) => {
         }
       }
     });
-    res.json(JSON.parse(response.text || '{}'));
+    
+    const parsed = JSON.parse(response.text || '{}');
+
+    if (actionType === 'generate_doc') {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        throw new Error('Google Workspace access token required for document generation.');
+      }
+      const token = authHeader.split(' ')[1];
+      const authClient = new google.auth.OAuth2();
+      authClient.setCredentials({ access_token: token });
+      const docs = google.docs({ version: 'v1', auth: authClient });
+
+      const doc = await docs.documents.create({
+        requestBody: {
+          title: `NEXUS Summary: ${details?.taskTitle || 'Task'}`
+        }
+      });
+
+      const documentId = doc.data.documentId;
+      if (documentId && parsed.generatedContent) {
+        await docs.documents.batchUpdate({
+          documentId: documentId,
+          requestBody: {
+            requests: [
+              {
+                insertText: {
+                  location: { index: 1 },
+                  text: parsed.generatedContent
+                }
+              }
+            ]
+          }
+        });
+      }
+
+      parsed.generatedContent = `Google Doc Generated: "${doc.data.title}"\n\nLink: https://docs.google.com/document/d/${documentId}\n\nContent Preview:\n${parsed.generatedContent}`;
+    }
+
+    res.json(parsed);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

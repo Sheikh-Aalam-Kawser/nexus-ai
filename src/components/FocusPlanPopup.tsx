@@ -41,7 +41,7 @@ export function FocusPlanPopup() {
           <div className="p-4 max-h-[300px] overflow-y-auto">
             {planStatus === 'executing' && approvedPlan ? (
               <div className="space-y-3">
-                {approvedPlan.items.slice(0, 3).map((item, idx) => (
+                {(approvedPlan.items || []).slice(0, 3).map((item, idx) => (
                   <div key={item.id} className={`p-3 rounded-xl flex items-start gap-3 border ${idx === 0 ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-slate-100/30 border-slate-200/50'}`}>
                     <div className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-mono mt-0.5 ${idx === 0 ? 'bg-indigo-500/20 text-indigo-600' : 'bg-slate-200 text-slate-500'}`}>
                       {idx + 1}
@@ -57,9 +57,9 @@ export function FocusPlanPopup() {
                     </div>
                   </div>
                 ))}
-                {approvedPlan.items.length > 3 && (
+                {(approvedPlan.items || []).length > 3 && (
                   <div className="text-center text-[10px] font-mono text-slate-500 pt-2">
-                    + {approvedPlan.items.length - 3} more items...
+                    + {(approvedPlan.items || []).length - 3} more items...
                   </div>
                 )}
               </div>

@@ -11,51 +11,10 @@ export function DistractionBlocker() {
   useEffect(() => {
     if (!emergencyMode) return;
 
-    // Request full screen on emergency mode start if not already
-    try {
-      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {
-          console.warn("Fullscreen request denied or not supported.");
-        });
-      }
-    } catch (e) {}
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setViolationActive(true);
-      }
-    };
-
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "EMERGENCY MODE ACTIVE. Are you sure you want to abandon your tasks?";
-      return e.returnValue;
-    };
-
-    const handleBlur = () => {
-      setViolationActive(true);
-      toast.error("DISTRACTION DETECTED: Return to your workspace immediately!", {
-        icon: <ShieldAlert className="h-5 w-5 text-red-500" />,
-        duration: 8000,
-      });
-      
-      // Leverage system API: Vibration
-      if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200, 100, 500]);
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("blur", handleBlur);
-
     // Simulate extension communication for actual blocking
     window.postMessage({ type: 'NEXUS_ENABLE_BLOCKER', domains: ['facebook.com', 'twitter.com', 'x.com', 'youtube.com', 'reddit.com', 'instagram.com'] }, '*');
 
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("blur", handleBlur);
       window.postMessage({ type: 'NEXUS_DISABLE_BLOCKER' }, '*');
     };
   }, [emergencyMode]);
@@ -64,6 +23,7 @@ export function DistractionBlocker() {
     <AnimatePresence>
       {violationActive && emergencyMode && (
         <motion.div 
+          key="blocker-overlay"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

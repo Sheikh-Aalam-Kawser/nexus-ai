@@ -77,10 +77,10 @@ export default function Profile() {
           >
             <ArrowLeft className="h-3 w-3" /> Back to Plan
           </button>
-          <h1 className="text-3xl font-light text-slate-900 tracking-tight" style={{ fontFamily: "'Georgia', serif" }}>
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-slate-900 leading-tight mt-2">
             Strategic Identity
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Manage user information, productivity metrics, and AI recommendations.</p>
+          <p className="text-base text-slate-500 mt-2 font-medium">Manage user information, productivity metrics, and AI recommendations.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-600 border border-emerald-500/20 text-xs font-mono">
@@ -92,7 +92,7 @@ export default function Profile() {
 
       {/* ----------------- MAIN LAYOUT GRID ----------------- */}
       <div className="max-w-md mx-auto">
-        <Card className="bg-white/60 border-slate-200 p-6 rounded-2xl flex flex-col justify-between space-y-6">
+        <Card className="bg-white border-slate-200/60 p-8 rounded-3xl flex flex-col justify-between space-y-6 shadow-sm hover:shadow-md transition-shadow group">
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-500 ring-1 ring-emerald-500/20">

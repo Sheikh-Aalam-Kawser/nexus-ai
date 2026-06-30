@@ -235,10 +235,10 @@ export default function MyTasks() {
           >
             <ArrowLeft className="h-3 w-3" /> Back to Plan
           </button>
-          <h1 className="text-3xl font-light text-slate-900 tracking-tight" style={{ fontFamily: "'Georgia', serif" }}>
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-slate-900 leading-tight mt-2">
             My Task Center
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Full administration, creation, and priority tracking.</p>
+          <p className="text-base text-slate-500 mt-2 font-medium">Full administration, creation, and priority tracking.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -361,7 +361,7 @@ export default function MyTasks() {
       </header>
 
       {/* Filters and Search Tools */}
-      <Card className="bg-white/80 border-slate-200 p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
+      <Card className="bg-white border-slate-200/60 p-6 rounded-3xl flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
         <div className="relative w-full md:max-w-xs">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
           <Input 
@@ -447,8 +447,8 @@ export default function MyTasks() {
                 exit={{ opacity: 0, x: -30 }}
                 layout
               >
-                <Card className={`bg-white border rounded-2xl p-5 flex flex-col gap-4 transition-all hover:bg-slate-50 ${
-                  isPrimary ? 'border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' : 'border-slate-200'
+                <Card className={`bg-white border-slate-200/60 rounded-3xl p-6 flex flex-col gap-5 transition-all hover:bg-slate-50 shadow-sm hover:shadow-md ${
+                  isPrimary ? 'border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.15)]' : ''
                 }`}>
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                     <div className="space-y-1.5 flex-1">

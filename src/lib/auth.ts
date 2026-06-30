@@ -1,29 +1,13 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Initialize Firebase
-export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
-
-// Enable offline persistence
-enableMultiTabIndexedDbPersistence(db).catch((err) => {
-  if (err.code === 'failed-precondition') {
-    console.warn('Multiple tabs open, persistence can only be enabled in one tab at a a time.');
-  } else if (err.code === 'unimplemented') {
-    console.warn('The current browser does not support all of the features required to enable persistence.');
-  }
-});
-
+const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
 
-// Add Workspace scopes
-googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');
-googleProvider.addScope('https://www.googleapis.com/auth/gmail.send');
-googleProvider.addScope('https://www.googleapis.com/auth/documents');
-googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+const provider = new GoogleAuthProvider();
+// Request Workspace scopes
+provider.addScope('https://www.googleapis.com/auth/documents');
 
 // Flag to indicate if we are in the middle of a sign-in flow.
 let isSigningIn = false;
@@ -50,16 +34,16 @@ export const initAuth = (
   });
 };
 
-export async function signIn(): Promise<{ user: User; accessToken: string } | null> {
-  if (!auth) throw new Error("Firebase not configured.");
+// Must be called from a button click or user interaction
+export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, googleProvider);
+    const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error('Failed to get access token from Firebase Auth');
     }
-    
+
     cachedAccessToken = credential.accessToken;
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
@@ -68,14 +52,13 @@ export async function signIn(): Promise<{ user: User; accessToken: string } | nu
   } finally {
     isSigningIn = false;
   }
-}
+};
 
 export const getAccessToken = async (): Promise<string | null> => {
   return cachedAccessToken;
 };
 
-export async function logOut() {
-  if (!auth) return;
-  await signOut(auth);
+export const logout = async () => {
+  await auth.signOut();
   cachedAccessToken = null;
-}
+};
